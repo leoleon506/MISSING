@@ -1,4 +1,4 @@
-import type { Tool } from "@modelcontextprotocol/core";
+import type { Tool } from "@modelcontextprotocol/client";
 export interface AgentOutput { selectedTools:string[]; finalOutcome:string; latencyMs:number; errors:string[]; }
 export type ToolCaller = (name:string,args:Record<string,unknown>)=>Promise<unknown>;
 export interface Agent { run(task:string,tools:Tool[],callTool:ToolCaller,requestId:string):Promise<AgentOutput>; }
