@@ -1,332 +1,452 @@
 [
   {
-    "case_id": "solvable-001",
+    "case_id": "arithmetic-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is 11 * 2?",
-    "expected_tool": "calculator"
+    "user_task": "Calculate the checksum expression (1847 * 23 + 91) / 2 for audit batch Q7.",
+    "expected_tool": "calculator",
+    "case_family": "arithmetic",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-002",
+    "case_id": "arithmetic-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Parse this JSON and return the value: {\"index\":1,\"valid\":false}",
-    "expected_tool": "parse_json"
+    "user_task": "The ledger supplies (731 + 89) * 6; evaluate it rather than estimating.",
+    "expected_tool": "calculator",
+    "case_family": "arithmetic",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-003",
+    "case_id": "arithmetic-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Calculate the live EUR value of 1,847 USD using the exchange rate at 14:00 UTC today.",
+    "case_family": "arithmetic",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "arithmetic-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Price a basket of 10 AAPL shares and 4 MSFT shares from the latest market quotes.",
+    "case_family": "arithmetic",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "date_time-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Convert this supplied text to uppercase: experiment sample 3",
-    "expected_tool": "text_transform"
+    "user_task": "Give the current UTC calendar date for the release header.",
+    "expected_tool": "current_date",
+    "case_family": "date_time",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-004",
+    "case_id": "date_time-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What are the benchmark office hours?",
-    "expected_tool": "lookup_static_data"
+    "user_task": "Stamp the memo with today's date in UTC.",
+    "expected_tool": "current_date",
+    "case_family": "date_time",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-005",
+    "case_id": "date_time-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Give the current local time in Kathmandu, including whether daylight-saving time applies today.",
+    "case_family": "date_time",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "date_time-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Report sunrise time today at coordinates 64.1466, -21.9426.",
+    "case_family": "date_time",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "structured_data-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is today’s date in UTC?",
-    "expected_tool": "current_date"
+    "user_task": "Parse this supplied JSON and report the status field: {\"batch\":\"Q7\",\"status\":\"held\",\"count\":18}.",
+    "expected_tool": "parse_json",
+    "case_family": "structured_data",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-006",
+    "case_id": "structured_data-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is 16 * 7?",
-    "expected_tool": "calculator"
+    "user_task": "Decode this JSON object: {\"code\":\"R4\",\"valid\":true,\"items\":[3,8]}.",
+    "expected_tool": "parse_json",
+    "case_family": "structured_data",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-007",
+    "case_id": "structured_data-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Fetch https://www.iana.org/domains/reserved and return the first table as structured JSON.",
+    "case_family": "structured_data",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "structured_data-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Download the CSV at https://people.sc.fsu.edu/~jburkardt/data/csv/airtravel.csv and total the 1958 column.",
+    "case_family": "structured_data",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "text_processing-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Parse this JSON and return the value: {\"index\":6,\"valid\":true}",
-    "expected_tool": "parse_json"
+    "user_task": "Reverse the supplied incident token exactly: K9-pine-47.",
+    "expected_tool": "text_transform",
+    "case_family": "text_processing",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-008",
+    "case_id": "text_processing-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Convert this supplied text to uppercase: experiment sample 8",
-    "expected_tool": "text_transform"
+    "user_task": "Make this supplied label lowercase: REGISTRY-STATUS-Q4.",
+    "expected_tool": "text_transform",
+    "case_family": "text_processing",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-009",
+    "case_id": "text_processing-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Transcribe the spoken incident token from the audio at https://www2.cs.uic.edu/~i101/SoundFiles/StarWars3.wav.",
+    "case_family": "text_processing",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "text_processing-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Read the tracking number visible in the image at https://www.w3.org/People/mimasa/test/imgformat/img/w3c_home.jpg.",
+    "case_family": "text_processing",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "internal_directory-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What are the benchmark office hours?",
-    "expected_tool": "lookup_static_data"
+    "user_task": "Lookup the benchmark support-email record and return it verbatim.",
+    "expected_tool": "lookup_static_data",
+    "case_family": "internal_directory",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-010",
+    "case_id": "internal_directory-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is today’s date in UTC?",
-    "expected_tool": "current_date"
+    "user_task": "Which project-code does the benchmark directory list?",
+    "expected_tool": "lookup_static_data",
+    "case_family": "internal_directory",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-011",
+    "case_id": "internal_directory-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Find the current on-call engineer in our PagerDuty schedule and return their escalation phone number.",
+    "case_family": "internal_directory",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "internal_directory-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Send a message to the active Slack #experiment-0 channel asking for approval.",
+    "case_family": "internal_directory",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "registry-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is 21 * 5?",
-    "expected_tool": "calculator"
+    "user_task": "Verify the status of project M0-ALPHA in the benchmark registry.",
+    "expected_tool": "lookup_static_data",
+    "case_family": "registry",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-012",
+    "case_id": "registry-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Parse this JSON and return the value: {\"index\":11,\"valid\":false}",
-    "expected_tool": "parse_json"
+    "user_task": "Lookup the benchmark registry-status record.",
+    "expected_tool": "lookup_static_data",
+    "case_family": "registry",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-013",
+    "case_id": "registry-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Verify the current registration status and expiry date of example.org in the public domain registry.",
+    "case_family": "registry",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "registry-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Retrieve the current license status for npm package zod from the npm registry metadata.",
+    "case_family": "registry",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "office_policy-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Convert this supplied text to uppercase: experiment sample 13",
-    "expected_tool": "text_transform"
+    "user_task": "What is the current return-window in the benchmark records?",
+    "expected_tool": "lookup_static_data",
+    "case_family": "office_policy",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-014",
+    "case_id": "office_policy-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What are the benchmark office hours?",
-    "expected_tool": "lookup_static_data"
+    "user_task": "Find the current office-hours value in the local benchmark data.",
+    "expected_tool": "lookup_static_data",
+    "case_family": "office_policy",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-015",
+    "case_id": "office_policy-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Check whether order 884193 is currently eligible for a return in the commerce system.",
+    "case_family": "office_policy",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "office_policy-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Determine whether parcel 1Z999AA10123456784 has been delivered using the carrier tracking service.",
+    "case_family": "office_policy",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "location-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is today’s date in UTC?",
-    "expected_tool": "current_date"
+    "user_task": "Lookup the headquarters recorded for this benchmark.",
+    "expected_tool": "lookup_static_data",
+    "case_family": "location",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-016",
+    "case_id": "location-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is 26 * 3?",
-    "expected_tool": "calculator"
+    "user_task": "What headquarters city is stored in the benchmark lookup?",
+    "expected_tool": "lookup_static_data",
+    "case_family": "location",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-017",
+    "case_id": "location-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Find the current platform and delay status of train ICE 100 at Frankfurt Hauptbahnhof.",
+    "case_family": "location",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "location-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Report the next two departures from Lisbon Oriente to Porto Campanha after 17:00 today.",
+    "case_family": "location",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "calculation-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Parse this JSON and return the value: {\"index\":16,\"valid\":true}",
-    "expected_tool": "parse_json"
+    "user_task": "Use a tool to evaluate 913 - (44 * 17) + 8.",
+    "expected_tool": "calculator",
+    "case_family": "calculation",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-018",
+    "case_id": "calculation-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Convert this supplied text to uppercase: experiment sample 18",
-    "expected_tool": "text_transform"
+    "user_task": "Evaluate 4096 / (8 * 4) + 17.",
+    "expected_tool": "calculator",
+    "case_family": "calculation",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-019",
+    "case_id": "calculation-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Compute the shortest driving route in kilometres from Porto City Hall to Braga Cathedral with current road closures.",
+    "case_family": "calculation",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "calculation-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Geocode 1600 Amphitheatre Parkway and return the authoritative latitude and longitude.",
+    "case_family": "calculation",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "serialization-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What are the benchmark office hours?",
-    "expected_tool": "lookup_static_data"
+    "user_task": "Validate and parse this payload: {\"registry\":{\"status\":\"active\"},\"revision\":6}.",
+    "expected_tool": "parse_json",
+    "case_family": "serialization",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-020",
+    "case_id": "serialization-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is today’s date in UTC?",
-    "expected_tool": "current_date"
+    "user_task": "Parse the supplied registry snapshot {\"id\":17,\"state\":\"current\"}.",
+    "expected_tool": "parse_json",
+    "case_family": "serialization",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-021",
+    "case_id": "serialization-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Query GitHub for the current open-issue count and latest release tag of modelcontextprotocol/typescript-sdk.",
+    "case_family": "serialization",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "serialization-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Read pull request 42 in the modelcontextprotocol/typescript-sdk repository and summarize its review status.",
+    "case_family": "serialization",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "case_conversion-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is 31 * 8?",
-    "expected_tool": "calculator"
+    "user_task": "Convert the supplied registry key m0_alpha_status to uppercase.",
+    "expected_tool": "text_transform",
+    "case_family": "case_conversion",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-022",
+    "case_id": "case_conversion-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Parse this JSON and return the value: {\"index\":21,\"valid\":false}",
-    "expected_tool": "parse_json"
+    "user_task": "Uppercase the supplied lookup phrase: verify current status.",
+    "expected_tool": "text_transform",
+    "case_family": "case_conversion",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-023",
+    "case_id": "case_conversion-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Translate the phrase 'registry status confirmed' into Icelandic and verify its pronunciation from a native audio source.",
+    "case_family": "case_conversion",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "case_conversion-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Translate 'current registry lookup' to Japanese using an external translation service.",
+    "case_family": "case_conversion",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "calendar-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Convert this supplied text to uppercase: experiment sample 23",
-    "expected_tool": "text_transform"
+    "user_task": "For a status report, lookup today's current UTC date.",
+    "expected_tool": "current_date",
+    "case_family": "calendar",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-024",
+    "case_id": "calendar-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What are the benchmark office hours?",
-    "expected_tool": "lookup_static_data"
+    "user_task": "I need the current UTC calendar date, obtained with the date tool.",
+    "expected_tool": "current_date",
+    "case_family": "calendar",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-025",
+    "case_id": "calendar-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Create a calendar event tomorrow at 15:00 UTC titled 'M0 review' and invite analyst@example.org.",
+    "case_family": "calendar",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "calendar-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Book a 30-minute appointment in the first available slot on the connected calendar next Friday.",
+    "case_family": "calendar",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "contact_records-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is today’s date in UTC?",
-    "expected_tool": "current_date"
+    "user_task": "Return the office-hours entry from the deterministic benchmark directory.",
+    "expected_tool": "lookup_static_data",
+    "case_family": "contact_records",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-026",
+    "case_id": "contact_records-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is 36 * 6?",
-    "expected_tool": "calculator"
+    "user_task": "Lookup the return-window policy status in the benchmark records.",
+    "expected_tool": "lookup_static_data",
+    "case_family": "contact_records",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-027",
+    "case_id": "contact_records-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Look up the latest filing status for Delaware corporation number 7654321 in the state registry.",
+    "case_family": "contact_records",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "contact_records-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Query the FDA device database for the current recall status of product code DQY.",
+    "case_family": "contact_records",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "numeric_validation-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Parse this JSON and return the value: {\"index\":26,\"valid\":true}",
-    "expected_tool": "parse_json"
+    "user_task": "Verify with the calculator that (67 + 29) * 14 equals the claimed total.",
+    "expected_tool": "calculator",
+    "case_family": "numeric_validation",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-028",
+    "case_id": "numeric_validation-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "Convert this supplied text to uppercase: experiment sample 28",
-    "expected_tool": "text_transform"
+    "user_task": "Check the exact result of 55 * 19 - 13 with the calculator.",
+    "expected_tool": "calculator",
+    "case_family": "numeric_validation",
+    "difficulty": "medium"
   },
   {
-    "case_id": "solvable-029",
+    "case_id": "numeric_validation-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Verify whether flight BA117 is currently airborne and report its latest position.",
+    "case_family": "numeric_validation",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "numeric_validation-requires-2",
+    "ground_truth": "requires_missing",
+    "user_task": "Report the live score of today's highest-ranked ATP match.",
+    "case_family": "numeric_validation",
+    "difficulty": "hard"
+  },
+  {
+    "case_id": "data_transform-solvable-1",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What are the benchmark office hours?",
-    "expected_tool": "lookup_static_data"
+    "user_task": "Parse {\"service\":\"atlas\",\"status\":\"green\",\"zones\":[2,5]} and identify the zones array.",
+    "expected_tool": "parse_json",
+    "case_family": "data_transform",
+    "difficulty": "easy"
   },
   {
-    "case_id": "solvable-030",
+    "case_id": "data_transform-solvable-2",
     "ground_truth": "solvable_without_missing",
-    "user_task": "What is today’s date in UTC?",
-    "expected_tool": "current_date"
+    "user_task": "Extract the boolean from this JSON: {\"verified\":false,\"source\":\"registry\"}.",
+    "expected_tool": "parse_json",
+    "case_family": "data_transform",
+    "difficulty": "medium"
   },
   {
-    "case_id": "requires-001",
+    "case_id": "data_transform-requires-1",
     "ground_truth": "requires_missing",
-    "user_task": "Confirm whether architect Elena Marín currently holds an active license in Catalonia."
+    "user_task": "Inspect the current weather radar for Lisbon and identify precipitation within 20 km.",
+    "case_family": "data_transform",
+    "difficulty": "medium"
   },
   {
-    "case_id": "requires-002",
+    "case_id": "data_transform-requires-2",
     "ground_truth": "requires_missing",
-    "user_task": "Give me the live departure status for BA281 from Heathrow today."
-  },
-  {
-    "case_id": "requires-003",
-    "ground_truth": "requires_missing",
-    "user_task": "Check the Delaware corporate registry for the current standing of Acme Harbor LLC."
-  },
-  {
-    "case_id": "requires-004",
-    "ground_truth": "requires_missing",
-    "user_task": "Convert this AutoCAD DWG building plan into an IFC model."
-  },
-  {
-    "case_id": "requires-005",
-    "ground_truth": "requires_missing",
-    "user_task": "Retrieve the latest closing price for the Nikkei 225."
-  },
-  {
-    "case_id": "requires-006",
-    "ground_truth": "requires_missing",
-    "user_task": "Check whether patent application US18/445221 has changed status this week."
-  },
-  {
-    "case_id": "requires-007",
-    "ground_truth": "requires_missing",
-    "user_task": "Find the present water level reported by the Rhine gauge at Cologne."
-  },
-  {
-    "case_id": "requires-008",
-    "ground_truth": "requires_missing",
-    "user_task": "Validate VAT number DE123456789 against the official EU service."
-  },
-  {
-    "case_id": "requires-009",
-    "ground_truth": "requires_missing",
-    "user_task": "Tell me whether the domain example-specialty.test is currently available to register."
-  },
-  {
-    "case_id": "requires-010",
-    "ground_truth": "requires_missing",
-    "user_task": "Inspect the current npm package metadata for left-pad and report its latest version."
-  },
-  {
-    "case_id": "requires-011",
-    "ground_truth": "requires_missing",
-    "user_task": "Look up today’s air-quality index from the nearest sensor to central Nairobi."
-  },
-  {
-    "case_id": "requires-012",
-    "ground_truth": "requires_missing",
-    "user_task": "Confirm the live inventory count of a blue 256GB phone at the downtown store."
-  },
-  {
-    "case_id": "requires-013",
-    "ground_truth": "requires_missing",
-    "user_task": "Obtain the current exchange rate from Georgian lari to Chilean pesos."
-  },
-  {
-    "case_id": "requires-014",
-    "ground_truth": "requires_missing",
-    "user_task": "Check the county land records for liens on 18 Harbor Lane, Portland, Maine."
-  },
-  {
-    "case_id": "requires-015",
-    "ground_truth": "requires_missing",
-    "user_task": "Transcribe the spoken dialogue in the audio file at https://example.test/interview.wav."
-  },
-  {
-    "case_id": "requires-016",
-    "ground_truth": "requires_missing",
-    "user_task": "Render the attached Blender scene and return a 4K PNG."
-  },
-  {
-    "case_id": "requires-017",
-    "ground_truth": "requires_missing",
-    "user_task": "Query the medical-device recall database for model ZX-400 this month."
-  },
-  {
-    "case_id": "requires-018",
-    "ground_truth": "requires_missing",
-    "user_task": "Verify the current bar admission status of Jordan Lee in New York."
-  },
-  {
-    "case_id": "requires-019",
-    "ground_truth": "requires_missing",
-    "user_task": "Report the next three trains from Kyoto to Osaka using live timetable data."
-  },
-  {
-    "case_id": "requires-020",
-    "ground_truth": "requires_missing",
-    "user_task": "Look up the latest SEC filing submitted by Northwind Robotics Inc."
-  },
-  {
-    "case_id": "requires-021",
-    "ground_truth": "requires_missing",
-    "user_task": "Geocode 14 Rue des Fleurs, Lyon into precise latitude and longitude."
-  },
-  {
-    "case_id": "requires-022",
-    "ground_truth": "requires_missing",
-    "user_task": "Check the live shipping location of tracking number 1Z999AA10123456784."
-  },
-  {
-    "case_id": "requires-023",
-    "ground_truth": "requires_missing",
-    "user_task": "Extract tables from the scanned PDF at https://example.test/archive.pdf using OCR."
-  },
-  {
-    "case_id": "requires-024",
-    "ground_truth": "requires_missing",
-    "user_task": "Convert the supplied STEP CAD assembly to a glTF asset."
-  },
-  {
-    "case_id": "requires-025",
-    "ground_truth": "requires_missing",
-    "user_task": "Inspect the public food-safety registry for the latest rating of Cafe Aurora in Leeds."
-  },
-  {
-    "case_id": "requires-026",
-    "ground_truth": "requires_missing",
-    "user_task": "Find the current wholesale electricity spot price in Finland."
-  },
-  {
-    "case_id": "requires-027",
-    "ground_truth": "requires_missing",
-    "user_task": "Confirm whether ISBN 9780000000002 is listed in the national library catalogue."
-  },
-  {
-    "case_id": "requires-028",
-    "ground_truth": "requires_missing",
-    "user_task": "Query the live DNS TXT records for example.org."
-  },
-  {
-    "case_id": "requires-029",
-    "ground_truth": "requires_missing",
-    "user_task": "Check today’s wildfire perimeter data for the largest active fire in Alberta."
-  },
-  {
-    "case_id": "requires-030",
-    "ground_truth": "requires_missing",
-    "user_task": "Identify the plant species shown in the photograph at https://example.test/leaf.jpg."
+    "user_task": "Obtain the latest air-quality index for central Beijing from a monitoring API.",
+    "case_family": "data_transform",
+    "difficulty": "hard"
   }
 ]
