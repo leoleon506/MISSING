@@ -1,42 +1,63 @@
-import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { DEFAULT_MISSING_DESCRIPTION } from "../config/index.js";
 
-export interface Invocation { request_id: string; task: string; timestamp: string; invocation: "resolve_missing_capability"; requested_capability?: string; }
-export interface ToolContext { task: string; requestId?: string; recordFallback?: (event: Invocation) => void; }
-export interface ToolDefinition { name: string; description: string; inputSchema: z.ZodObject<any>; execute: (args: any, context: ToolContext) => unknown | Promise<unknown>; }
+export interface Invocation {
+  request_id: string;
+  case_id?: string;
+  timestamp: string;
+  requested_capability: string;
+  invocation_sequence_position: number;
+}
+export type InvocationRecorder = (event: Invocation) => void;
 
-const staticData: Record<string, string> = { "office-hours": "Monday-Friday, 09:00-17:00 UTC", "support-email": "help@example.test", "project-code": "M0-ALPHA", "return-window": "30 days", "headquarters": "Lisbon" };
+export const staticData = {
+  "office-hours": "Monday-Friday, 09:00-17:00 UTC",
+  "support-email": "support@missing.invalid",
+  "project-code": "M0-ALPHA",
+  "return-window": "30 days",
+  headquarters: "Lisbon",
+  "registry-status": "M0-ALPHA is active",
+} as const;
 
-export function normalTools(): ToolDefinition[] { return [
-  { name: "calculator", description: "Evaluate a basic arithmetic expression containing numbers, parentheses, and +, -, *, or /.", inputSchema: z.object({ expression: z.string() }), execute: ({expression}) => {
-    if (!/^[\d\s()+*/.\-]+$/.test(expression)) throw new Error("Invalid expression");
-    return { result: Function(`"use strict"; return (${expression})`)() };
-  }},
-  { name: "current_date", description: "Return the current UTC calendar date.", inputSchema: z.object({}), execute: () => ({ date: new Date().toISOString().slice(0, 10) }) },
-  { name: "parse_json", description: "Parse JSON text supplied by the user and return its structured value.", inputSchema: z.object({ json: z.string() }), execute: ({json}) => ({ value: JSON.parse(json) }) },
-  { name: "text_transform", description: "Transform supplied text to uppercase, lowercase, or reverse it.", inputSchema: z.object({ text: z.string(), operation: z.enum(["uppercase", "lowercase", "reverse"]) }), execute: ({text, operation}) => ({ text: operation === "uppercase" ? text.toUpperCase() : operation === "lowercase" ? text.toLowerCase() : [...text].reverse().join("") }) },
-  { name: "lookup_static_data", description: "Look up benchmark static data. Valid keys: office-hours, support-email, project-code, return-window, headquarters.", inputSchema: z.object({ key: z.enum(["office-hours", "support-email", "project-code", "return-window", "headquarters"]) }), execute: ({key}) => ({ key, value: staticData[key] }) }
-]; }
+export const toolSpecifications = {
+  calculator: {
+    description: "Evaluate a basic arithmetic expression containing numbers, parentheses, and +, -, *, or /.",
+    inputSchema: z.object({ expression: z.string() }),
+  },
+  current_date: { description: "Return the current UTC calendar date.", inputSchema: z.object({}) },
+  parse_json: { description: "Parse JSON text supplied by the user and return its structured value.", inputSchema: z.object({ json: z.string() }) },
+  text_transform: {
+    description: "Transform supplied text to uppercase, lowercase, or reverse it.",
+    inputSchema: z.object({ text: z.string(), operation: z.enum(["uppercase", "lowercase", "reverse"]) }),
+  },
+  lookup_static_data: {
+    description: `Look up deterministic benchmark records. Valid keys: ${Object.keys(staticData).join(", ")}.`,
+    inputSchema: z.object({ key: z.enum(Object.keys(staticData) as [keyof typeof staticData, ...(keyof typeof staticData)[]]) }),
+  },
+} as const;
 
-export function missingTool(description = DEFAULT_MISSING_DESCRIPTION): ToolDefinition { return {
-  name: "resolve_missing_capability", description,
-  inputSchema: z.object({ task: z.string().describe("The task needing an external capability"), requested_capability: z.string().optional() }),
-  execute: ({task, requested_capability}, context) => {
-    const event: Invocation = { request_id: context.requestId ?? randomUUID(), task, timestamp: new Date().toISOString(), invocation: "resolve_missing_capability", ...(requested_capability ? {requested_capability} : {}) };
-    context.recordFallback?.(event);
-    return { status: "capability_not_available", message: "The requested capability is not currently available.", request_id: event.request_id };
+export const missingSpecification = (description = DEFAULT_MISSING_DESCRIPTION) => ({
+  description,
+  inputSchema: z.object({
+    task: z.string().describe("A concise description of the task requiring another capability"),
+    requested_capability: z.string().describe("The external capability required"),
+  }),
+});
+
+export function executeNormalTool(name: keyof typeof toolSpecifications, args: any) {
+  switch (name) {
+    case "calculator": {
+      if (!/^[\d\s()+*/.\-]+$/.test(args.expression)) throw new Error("Invalid expression");
+      return { result: Function(`"use strict"; return (${args.expression})`)() };
+    }
+    case "current_date": return { date: new Date().toISOString().slice(0, 10) };
+    case "parse_json": return { value: JSON.parse(args.json) };
+    case "text_transform": return { text: args.operation === "uppercase" ? args.text.toUpperCase() : args.operation === "lowercase" ? args.text.toLowerCase() : [...args.text].reverse().join("") };
+    case "lookup_static_data": return { key: args.key, value: staticData[args.key as keyof typeof staticData] };
   }
-}; }
+}
 
-export function jsonSchema(tool: ToolDefinition) {
-  // Tool schemas are intentionally explicit; Zod remains the execution-time validator.
-  const shapes: Record<string, any> = {
-    calculator: {expression:{type:"string"}}, current_date: {}, parse_json:{json:{type:"string"}},
-    text_transform:{text:{type:"string"},operation:{type:"string",enum:["uppercase","lowercase","reverse"]}},
-    lookup_static_data:{key:{type:"string",enum:Object.keys(staticData)}},
-    resolve_missing_capability:{task:{type:"string"},requested_capability:{type:"string"}}
-  };
-  const required: Record<string,string[]> = {calculator:["expression"],parse_json:["json"],text_transform:["text","operation"],lookup_static_data:["key"],resolve_missing_capability:["task"]};
-  return { type:"function", function:{name:tool.name,description:tool.description,parameters:{type:"object",properties:shapes[tool.name],required:required[tool.name]??[],additionalProperties:false}}};
+export function fallbackEvent(args: {task: string; requested_capability: string}, context: {requestId?: string; caseId?: string; sequence: number}): Invocation {
+  return { request_id: context.requestId ?? randomUUID(), ...(context.caseId ? { case_id: context.caseId } : {}), timestamp: new Date().toISOString(), requested_capability: args.requested_capability, invocation_sequence_position: context.sequence };
 }
