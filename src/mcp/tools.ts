@@ -20,6 +20,13 @@ export const staticData = {
   "registry-status": "M0-ALPHA is active",
 } as const;
 
+/** Finite, synthetic records that resemble live sources without making network calls. */
+export const benchmarkExternalData = {
+  registry: { "M0-ALPHA": { status: "active", jurisdiction: "benchmark" } },
+  market: { "MISSING-USD": { price: 42.25, as_of: "2026-07-28T16:00:00Z" } },
+  status: { "benchmark-api": { status: "operational", checked_at: "2026-07-28T16:00:00Z" } },
+} as const;
+
 export const toolSpecifications = {
   calculator: {
     description: "Evaluate a basic arithmetic expression containing numbers, parentheses, and +, -, *, or /.",
@@ -34,6 +41,18 @@ export const toolSpecifications = {
   lookup_static_data: {
     description: `Look up deterministic benchmark records. Valid keys: ${Object.keys(staticData).join(", ")}.`,
     inputSchema: z.object({ key: z.enum(Object.keys(staticData) as [keyof typeof staticData, ...(keyof typeof staticData)[]]) }),
+  },
+  benchmark_registry_lookup: {
+    description: "Verify a current-style record in the deterministic benchmark registry. Coverage is limited to registry ID M0-ALPHA.",
+    inputSchema: z.object({ registry_id: z.literal("M0-ALPHA") }),
+  },
+  benchmark_market_data: {
+    description: "Return a current-style quote from deterministic benchmark market data. Coverage is limited to symbol MISSING-USD.",
+    inputSchema: z.object({ symbol: z.literal("MISSING-USD") }),
+  },
+  benchmark_status_lookup: {
+    description: "Verify service status from the deterministic benchmark status feed. Coverage is limited to service benchmark-api.",
+    inputSchema: z.object({ service: z.literal("benchmark-api") }),
   },
 } as const;
 
@@ -55,6 +74,9 @@ export function executeNormalTool(name: keyof typeof toolSpecifications, args: a
     case "parse_json": return { value: JSON.parse(args.json) };
     case "text_transform": return { text: args.operation === "uppercase" ? args.text.toUpperCase() : args.operation === "lowercase" ? args.text.toLowerCase() : [...args.text].reverse().join("") };
     case "lookup_static_data": return { key: args.key, value: staticData[args.key as keyof typeof staticData] };
+    case "benchmark_registry_lookup": return benchmarkExternalData.registry[args.registry_id as "M0-ALPHA"];
+    case "benchmark_market_data": return benchmarkExternalData.market[args.symbol as "MISSING-USD"];
+    case "benchmark_status_lookup": return benchmarkExternalData.status[args.service as "benchmark-api"];
   }
 }
 

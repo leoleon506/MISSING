@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { StdioServerTransport } from "@modelcontextprotocol/node";
+import { serveStdio as serveMcpStdio } from "@modelcontextprotocol/server/stdio";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../config/index.js";
 import { executeNormalTool, fallbackEvent, missingSpecification, toolSpecifications, type InvocationRecorder } from "./tools.js";
@@ -26,6 +26,6 @@ export function createBenchmarkServer(options: BenchmarkServerOptions): McpServe
 
 export async function serveStdio() {
   const config = loadConfig();
-  await createBenchmarkServer({ includeMissing: true, missingDescription: config.description, recorder: event => process.stderr.write(`${JSON.stringify(event)}\n`) }).connect(new StdioServerTransport());
+  await serveMcpStdio(() => createBenchmarkServer({ includeMissing: true, missingDescription: config.description, recorder: event => process.stderr.write(`${JSON.stringify(event)}\n`) }));
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await serveStdio();

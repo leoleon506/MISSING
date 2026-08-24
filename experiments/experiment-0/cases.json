@@ -448,5 +448,50 @@
     "user_task": "Obtain the latest air-quality index for central Beijing from a monitoring API.",
     "case_family": "data_transform",
     "difficulty": "hard"
+  },
+  {
+    "case_id": "external-registry-solvable-1",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Verify the current registry status of M0-ALPHA using the benchmark registry.",
+    "expected_tool": "benchmark_registry_lookup",
+    "case_family": "external_registry_coverage",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "external-registry-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Verify the current registry status of M0-BETA using the benchmark registry.",
+    "case_family": "external_registry_coverage",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "external-market-solvable-1",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Report the latest MISSING-USD quote from the benchmark market feed.",
+    "expected_tool": "benchmark_market_data",
+    "case_family": "external_market_coverage",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "external-market-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Report the latest MISSING-EUR quote from the benchmark market feed.",
+    "case_family": "external_market_coverage",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "external-status-solvable-1",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Check whether benchmark-api is currently operational in the benchmark status feed.",
+    "expected_tool": "benchmark_status_lookup",
+    "case_family": "external_status_coverage",
+    "difficulty": "medium"
+  },
+  {
+    "case_id": "external-status-requires-1",
+    "ground_truth": "requires_missing",
+    "user_task": "Check whether production-api is currently operational in the benchmark status feed.",
+    "case_family": "external_status_coverage",
+    "difficulty": "medium"
   }
 ]
