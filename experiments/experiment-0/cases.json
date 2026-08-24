@@ -1,0 +1,332 @@
+[
+  {
+    "case_id": "solvable-001",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is 11 * 2?",
+    "expected_tool": "calculator"
+  },
+  {
+    "case_id": "solvable-002",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Parse this JSON and return the value: {\"index\":1,\"valid\":false}",
+    "expected_tool": "parse_json"
+  },
+  {
+    "case_id": "solvable-003",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Convert this supplied text to uppercase: experiment sample 3",
+    "expected_tool": "text_transform"
+  },
+  {
+    "case_id": "solvable-004",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What are the benchmark office hours?",
+    "expected_tool": "lookup_static_data"
+  },
+  {
+    "case_id": "solvable-005",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is today’s date in UTC?",
+    "expected_tool": "current_date"
+  },
+  {
+    "case_id": "solvable-006",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is 16 * 7?",
+    "expected_tool": "calculator"
+  },
+  {
+    "case_id": "solvable-007",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Parse this JSON and return the value: {\"index\":6,\"valid\":true}",
+    "expected_tool": "parse_json"
+  },
+  {
+    "case_id": "solvable-008",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Convert this supplied text to uppercase: experiment sample 8",
+    "expected_tool": "text_transform"
+  },
+  {
+    "case_id": "solvable-009",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What are the benchmark office hours?",
+    "expected_tool": "lookup_static_data"
+  },
+  {
+    "case_id": "solvable-010",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is today’s date in UTC?",
+    "expected_tool": "current_date"
+  },
+  {
+    "case_id": "solvable-011",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is 21 * 5?",
+    "expected_tool": "calculator"
+  },
+  {
+    "case_id": "solvable-012",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Parse this JSON and return the value: {\"index\":11,\"valid\":false}",
+    "expected_tool": "parse_json"
+  },
+  {
+    "case_id": "solvable-013",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Convert this supplied text to uppercase: experiment sample 13",
+    "expected_tool": "text_transform"
+  },
+  {
+    "case_id": "solvable-014",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What are the benchmark office hours?",
+    "expected_tool": "lookup_static_data"
+  },
+  {
+    "case_id": "solvable-015",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is today’s date in UTC?",
+    "expected_tool": "current_date"
+  },
+  {
+    "case_id": "solvable-016",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is 26 * 3?",
+    "expected_tool": "calculator"
+  },
+  {
+    "case_id": "solvable-017",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Parse this JSON and return the value: {\"index\":16,\"valid\":true}",
+    "expected_tool": "parse_json"
+  },
+  {
+    "case_id": "solvable-018",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Convert this supplied text to uppercase: experiment sample 18",
+    "expected_tool": "text_transform"
+  },
+  {
+    "case_id": "solvable-019",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What are the benchmark office hours?",
+    "expected_tool": "lookup_static_data"
+  },
+  {
+    "case_id": "solvable-020",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is today’s date in UTC?",
+    "expected_tool": "current_date"
+  },
+  {
+    "case_id": "solvable-021",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is 31 * 8?",
+    "expected_tool": "calculator"
+  },
+  {
+    "case_id": "solvable-022",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Parse this JSON and return the value: {\"index\":21,\"valid\":false}",
+    "expected_tool": "parse_json"
+  },
+  {
+    "case_id": "solvable-023",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Convert this supplied text to uppercase: experiment sample 23",
+    "expected_tool": "text_transform"
+  },
+  {
+    "case_id": "solvable-024",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What are the benchmark office hours?",
+    "expected_tool": "lookup_static_data"
+  },
+  {
+    "case_id": "solvable-025",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is today’s date in UTC?",
+    "expected_tool": "current_date"
+  },
+  {
+    "case_id": "solvable-026",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is 36 * 6?",
+    "expected_tool": "calculator"
+  },
+  {
+    "case_id": "solvable-027",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Parse this JSON and return the value: {\"index\":26,\"valid\":true}",
+    "expected_tool": "parse_json"
+  },
+  {
+    "case_id": "solvable-028",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "Convert this supplied text to uppercase: experiment sample 28",
+    "expected_tool": "text_transform"
+  },
+  {
+    "case_id": "solvable-029",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What are the benchmark office hours?",
+    "expected_tool": "lookup_static_data"
+  },
+  {
+    "case_id": "solvable-030",
+    "ground_truth": "solvable_without_missing",
+    "user_task": "What is today’s date in UTC?",
+    "expected_tool": "current_date"
+  },
+  {
+    "case_id": "requires-001",
+    "ground_truth": "requires_missing",
+    "user_task": "Confirm whether architect Elena Marín currently holds an active license in Catalonia."
+  },
+  {
+    "case_id": "requires-002",
+    "ground_truth": "requires_missing",
+    "user_task": "Give me the live departure status for BA281 from Heathrow today."
+  },
+  {
+    "case_id": "requires-003",
+    "ground_truth": "requires_missing",
+    "user_task": "Check the Delaware corporate registry for the current standing of Acme Harbor LLC."
+  },
+  {
+    "case_id": "requires-004",
+    "ground_truth": "requires_missing",
+    "user_task": "Convert this AutoCAD DWG building plan into an IFC model."
+  },
+  {
+    "case_id": "requires-005",
+    "ground_truth": "requires_missing",
+    "user_task": "Retrieve the latest closing price for the Nikkei 225."
+  },
+  {
+    "case_id": "requires-006",
+    "ground_truth": "requires_missing",
+    "user_task": "Check whether patent application US18/445221 has changed status this week."
+  },
+  {
+    "case_id": "requires-007",
+    "ground_truth": "requires_missing",
+    "user_task": "Find the present water level reported by the Rhine gauge at Cologne."
+  },
+  {
+    "case_id": "requires-008",
+    "ground_truth": "requires_missing",
+    "user_task": "Validate VAT number DE123456789 against the official EU service."
+  },
+  {
+    "case_id": "requires-009",
+    "ground_truth": "requires_missing",
+    "user_task": "Tell me whether the domain example-specialty.test is currently available to register."
+  },
+  {
+    "case_id": "requires-010",
+    "ground_truth": "requires_missing",
+    "user_task": "Inspect the current npm package metadata for left-pad and report its latest version."
+  },
+  {
+    "case_id": "requires-011",
+    "ground_truth": "requires_missing",
+    "user_task": "Look up today’s air-quality index from the nearest sensor to central Nairobi."
+  },
+  {
+    "case_id": "requires-012",
+    "ground_truth": "requires_missing",
+    "user_task": "Confirm the live inventory count of a blue 256GB phone at the downtown store."
+  },
+  {
+    "case_id": "requires-013",
+    "ground_truth": "requires_missing",
+    "user_task": "Obtain the current exchange rate from Georgian lari to Chilean pesos."
+  },
+  {
+    "case_id": "requires-014",
+    "ground_truth": "requires_missing",
+    "user_task": "Check the county land records for liens on 18 Harbor Lane, Portland, Maine."
+  },
+  {
+    "case_id": "requires-015",
+    "ground_truth": "requires_missing",
+    "user_task": "Transcribe the spoken dialogue in the audio file at https://example.test/interview.wav."
+  },
+  {
+    "case_id": "requires-016",
+    "ground_truth": "requires_missing",
+    "user_task": "Render the attached Blender scene and return a 4K PNG."
+  },
+  {
+    "case_id": "requires-017",
+    "ground_truth": "requires_missing",
+    "user_task": "Query the medical-device recall database for model ZX-400 this month."
+  },
+  {
+    "case_id": "requires-018",
+    "ground_truth": "requires_missing",
+    "user_task": "Verify the current bar admission status of Jordan Lee in New York."
+  },
+  {
+    "case_id": "requires-019",
+    "ground_truth": "requires_missing",
+    "user_task": "Report the next three trains from Kyoto to Osaka using live timetable data."
+  },
+  {
+    "case_id": "requires-020",
+    "ground_truth": "requires_missing",
+    "user_task": "Look up the latest SEC filing submitted by Northwind Robotics Inc."
+  },
+  {
+    "case_id": "requires-021",
+    "ground_truth": "requires_missing",
+    "user_task": "Geocode 14 Rue des Fleurs, Lyon into precise latitude and longitude."
+  },
+  {
+    "case_id": "requires-022",
+    "ground_truth": "requires_missing",
+    "user_task": "Check the live shipping location of tracking number 1Z999AA10123456784."
+  },
+  {
+    "case_id": "requires-023",
+    "ground_truth": "requires_missing",
+    "user_task": "Extract tables from the scanned PDF at https://example.test/archive.pdf using OCR."
+  },
+  {
+    "case_id": "requires-024",
+    "ground_truth": "requires_missing",
+    "user_task": "Convert the supplied STEP CAD assembly to a glTF asset."
+  },
+  {
+    "case_id": "requires-025",
+    "ground_truth": "requires_missing",
+    "user_task": "Inspect the public food-safety registry for the latest rating of Cafe Aurora in Leeds."
+  },
+  {
+    "case_id": "requires-026",
+    "ground_truth": "requires_missing",
+    "user_task": "Find the current wholesale electricity spot price in Finland."
+  },
+  {
+    "case_id": "requires-027",
+    "ground_truth": "requires_missing",
+    "user_task": "Confirm whether ISBN 9780000000002 is listed in the national library catalogue."
+  },
+  {
+    "case_id": "requires-028",
+    "ground_truth": "requires_missing",
+    "user_task": "Query the live DNS TXT records for example.org."
+  },
+  {
+    "case_id": "requires-029",
+    "ground_truth": "requires_missing",
+    "user_task": "Check today’s wildfire perimeter data for the largest active fire in Alberta."
+  },
+  {
+    "case_id": "requires-030",
+    "ground_truth": "requires_missing",
+    "user_task": "Identify the plant species shown in the photograph at https://example.test/leaf.jpg."
+  }
+]
