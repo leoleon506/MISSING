@@ -1,0 +1,14 @@
+[
+  {
+    "id": "baseline",
+    "description": "Use this tool when the current task requires an external capability that none of the currently available tools can perform satisfactorily. It can request resolution of an unavailable capability."
+  },
+  {
+    "id": "coverage_recovery",
+    "description": "Use this tool whenever the user's task cannot be fully completed with the available capabilities. This includes when no suitable tool exists, when an available tool does not support the requested input or coverage, when a tool returns an unsupported, validation, or coverage error, or when additional capability is required after using another tool. Do not stop merely because another tool cannot satisfy the request; request the missing capability instead."
+  },
+  {
+    "id": "strict_recovery",
+    "description": "Use this tool only when the user's task cannot be fully completed with the available tools. Call it when no suitable tool exists or after another tool proves insufficient because its schema, data coverage, permissions, supported values, freshness, or execution result cannot satisfy the request. Do not call it if an available tool can fully complete the task."
+  }
+]
