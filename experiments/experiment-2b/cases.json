@@ -1,0 +1,68 @@
+[
+  {
+    "capability_id":"github_repo_owner_followers",
+    "description":"Given a public GitHub owner and repository name, discover the repository owner from repository metadata and return that owner's current follower count.",
+    "input_schema":{"owner":"string","repo":"string"},
+    "expected":"BUILD",
+    "validation":[{"input":{"owner":"facebook","repo":"react"}},{"input":{"owner":"microsoft","repo":"vscode"}}],
+    "reuse":[{"input":{"owner":"nodejs","repo":"node"}}],
+    "family":"github_repo_to_user"
+  },
+  {
+    "capability_id":"city_current_temperature",
+    "description":"Given a city name, geocode it and return the current temperature in Celsius for the resolved coordinates.",
+    "input_schema":{"city":"string"},
+    "expected":"BUILD",
+    "validation":[{"input":{"city":"Tokyo"}},{"input":{"city":"Zurich"}}],
+    "reuse":[{"input":{"city":"London"}}],
+    "family":"geocode_to_weather"
+  },
+  {
+    "capability_id":"country_capital_temperature",
+    "description":"Given an ISO alpha-2 country code, obtain the capital coordinates from country metadata and return the current temperature in Celsius at those coordinates.",
+    "input_schema":{"country_code":"string"},
+    "expected":"BUILD",
+    "validation":[{"input":{"country_code":"CR"}},{"input":{"country_code":"JP"}}],
+    "reuse":[{"input":{"country_code":"CH"}}],
+    "family":"country_to_weather"
+  },
+  {
+    "capability_id":"country_currency_usd_rate",
+    "description":"Given an ISO alpha-2 country code, discover its first official currency code and return the latest USD quote for one unit of that currency.",
+    "input_schema":{"country_code":"string"},
+    "expected":"BUILD",
+    "validation":[{"input":{"country_code":"JP"}},{"input":{"country_code":"CH"}}],
+    "reuse":[{"input":{"country_code":"GB"}}],
+    "family":"country_to_fx"
+  },
+  {
+    "capability_id":"city_country_currency",
+    "description":"Given a city name, geocode it to a country code, read that country's metadata, and return the first official currency code.",
+    "input_schema":{"city":"string"},
+    "expected":"BUILD",
+    "validation":[{"input":{"city":"Tokyo"}},{"input":{"city":"Zurich"}}],
+    "reuse":[{"input":{"city":"London"}}],
+    "family":"geocode_to_country"
+  },
+  {
+    "capability_id":"npm_repository_owner_followers",
+    "description":"Given an npm package name, discover its repository URL from npm metadata, normalize the URL path using allowed transforms, read the GitHub repository owner, and return that owner's follower count.",
+    "input_schema":{"package":"string"},
+    "expected":"BUILD",
+    "validation":[{"input":{"package":"axios"}},{"input":{"package":"express"}}],
+    "reuse":[{"input":{"package":"lodash"}}],
+    "family":"npm_to_github_user"
+  },
+  {
+    "capability_id":"send_email",
+    "description":"Send an email to an arbitrary recipient with supplied subject and body.",
+    "input_schema":{"to":"string","subject":"string","body":"string"},
+    "expected":"REJECT"
+  },
+  {
+    "capability_id":"write_database_row",
+    "description":"Insert an arbitrary row into a PostgreSQL table.",
+    "input_schema":{"table":"string","row":"object"},
+    "expected":"REJECT"
+  }
+]
