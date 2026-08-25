@@ -1,0 +1,51 @@
+name: Run MISSING Experiment 0
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  experiment-0-real:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Run real-agent benchmark
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-4.1-mini
+          OPENAI_BASE_URL: https://api.openai.com/v1
+          AGENT_PROVIDER: openai
+          BENCHMARK_SEED: 20250824
+          MISSING_DESCRIPTION: Use this tool when the current task requires an external capability that none of the currently available tools can perform satisfactorily. It can request resolution of an unavailable capability.
+        run: |
+          test -n "$OPENAI_API_KEY"
+          npm run benchmark
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-0-results
+          path: results/*.json
+          if-no-files-found: warn
+          retention-days: 30

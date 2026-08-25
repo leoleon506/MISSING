@@ -16,7 +16,7 @@ The control and MISSING conditions preserve normal-tool order. A seed determines
 
 ## Dataset
 
-`experiments/experiment-0/cases.json` contains 60 deterministic evaluator cases: 30 solvable and 30 requiring a genuinely absent external capability, across 15 paired capability families. Metadata fields `ground_truth`, `case_family`, optional `difficulty`, and `expected_tool` remain evaluator-only. Partial-coverage and realistic external-data boundaries are included; nonexistent attachments and reserved `.test` tasks are not.
+`experiments/experiment-0/cases.json` contains 66 deterministic evaluator cases: 33 solvable and 33 requiring a genuinely absent external capability, across at least 15 paired capability families. Metadata fields `ground_truth`, `case_family`, optional `difficulty`, and `expected_tool` remain evaluator-only. Partial-coverage and realistic external-data boundaries are included; nonexistent attachments and reserved `.test` tasks are not.
 
 ## Metrics
 
@@ -42,6 +42,8 @@ OPENAI_API_KEY=... npm run benchmark
 
 The benchmark command writes a JSON artifact under `results/`. CI only installs, tests, and builds; it never calls a paid provider.
 
+The manual GitHub Actions workflow `Run MISSING Experiment 0` requires the repository secret `OPENAI_API_KEY`. It runs the locked dependency install, tests, build, then the real-agent benchmark and uploads the resulting `results/*.json` files as an artifact. The benchmark uses the configured model, seed, and MISSING description without changing the dataset or tool schemas.
+
 ## Remaining validity limits
 
-The benchmark is still provider/model/prompt sensitive, has only 60 hand-authored cases, and records tool behavior rather than judging factual final answers. Tool descriptions can induce position or wording effects despite paired randomization. External-capability cases are evaluator assertions rather than live probes, while deterministic normal tools are deliberately artificial. A paid run, multi-model replication, blinded human review of final outcomes, power analysis, and confidence intervals remain future experimental work—not part of this revision.
+The benchmark is still provider/model/prompt sensitive, has only 66 hand-authored cases, and records tool behavior rather than judging factual final answers. Tool descriptions can induce position or wording effects despite paired randomization. External-capability cases are evaluator assertions rather than live probes, while deterministic normal tools are deliberately artificial. A paid run, multi-model replication, blinded human review of final outcomes, power analysis, and confidence intervals remain future experimental work—not part of this revision.
