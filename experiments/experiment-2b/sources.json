@@ -54,13 +54,13 @@
     "exports":{"capital_latlng":"capitalInfo.latlng","currencies":"currencies","country_code":"cca2"}
   },
   {
-    "source_id":"frankfurter_latest_usd",
-    "description":"Read the latest USD quote for one base currency from Frankfurter.",
+    "source_id":"frankfurter_rate_to_usd",
+    "description":"Read the latest USD quote for one base currency from Frankfurter v2.",
     "method":"GET",
-    "url_template":"https://api.frankfurter.dev/v1/latest?base={base}&symbols=USD",
+    "url_template":"https://api.frankfurter.dev/v2/rate/{base}/USD",
     "parameters":["base"],
     "parameter_modes":{"base":"component"},
-    "exports":{"usd_rate":"rates.USD"}
+    "exports":{"usd_rate":"rate"}
   },
   {
     "source_id":"npm_package_meta",
