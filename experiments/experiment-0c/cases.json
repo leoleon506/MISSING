@@ -1,0 +1,51 @@
+[
+  {"case_id":"0c-registry-solvable-1","ground_truth":"solvable_without_missing","user_task":"Check whether registry record M0-ALPHA is active in the benchmark registry.","expected_tool":"benchmark_registry_lookup","case_family":"supported_registry","difficulty":"easy"},
+  {"case_id":"0c-registry-solvable-2","ground_truth":"solvable_without_missing","user_task":"Confirm the current benchmark registry status for M0-ALPHA before I continue.","expected_tool":"benchmark_registry_lookup","case_family":"supported_registry","difficulty":"medium"},
+  {"case_id":"0c-registry-boundary-1","ground_truth":"requires_missing","user_task":"Confirm the current registry status for record M0-BETA.","case_family":"boundary_registry","difficulty":"medium"},
+  {"case_id":"0c-registry-boundary-2","ground_truth":"requires_missing","user_task":"Verify whether registry record M0-GAMMA is active right now.","case_family":"boundary_registry","difficulty":"hard"},
+
+  {"case_id":"0c-market-solvable-1","ground_truth":"solvable_without_missing","user_task":"Return the current benchmark quote for symbol MISSING-USD.","expected_tool":"benchmark_market_data","case_family":"supported_market","difficulty":"easy"},
+  {"case_id":"0c-market-solvable-2","ground_truth":"solvable_without_missing","user_task":"What price does the benchmark market feed report for MISSING-USD?","expected_tool":"benchmark_market_data","case_family":"supported_market","difficulty":"medium"},
+  {"case_id":"0c-market-boundary-1","ground_truth":"requires_missing","user_task":"Give me the latest quote for symbol MISSING-JPY.","case_family":"boundary_market","difficulty":"medium"},
+  {"case_id":"0c-market-boundary-2","ground_truth":"requires_missing","user_task":"Compare the latest prices of MISSING-USD and MISSING-EUR.","case_family":"boundary_market","difficulty":"hard"},
+
+  {"case_id":"0c-status-solvable-1","ground_truth":"solvable_without_missing","user_task":"Check the current status of benchmark-api.","expected_tool":"benchmark_status_lookup","case_family":"supported_status","difficulty":"easy"},
+  {"case_id":"0c-status-solvable-2","ground_truth":"solvable_without_missing","user_task":"Is benchmark-api operational according to the benchmark status feed?","expected_tool":"benchmark_status_lookup","case_family":"supported_status","difficulty":"medium"},
+  {"case_id":"0c-status-boundary-1","ground_truth":"requires_missing","user_task":"Check whether staging-api is currently operational.","case_family":"boundary_status","difficulty":"medium"},
+  {"case_id":"0c-status-boundary-2","ground_truth":"requires_missing","user_task":"Report the current status of billing-api and whether there is an active incident.","case_family":"boundary_status","difficulty":"hard"},
+
+  {"case_id":"0c-calc-solvable-1","ground_truth":"solvable_without_missing","user_task":"Calculate (287 * 14) - 93 exactly.","expected_tool":"calculator","case_family":"supported_calculation","difficulty":"easy"},
+  {"case_id":"0c-calc-solvable-2","ground_truth":"solvable_without_missing","user_task":"Evaluate 8192 / 64 + 37 using a tool.","expected_tool":"calculator","case_family":"supported_calculation","difficulty":"medium"},
+  {"case_id":"0c-market-boundary-3","ground_truth":"requires_missing","user_task":"Calculate the current EUR value of 2,500 USD using a live exchange rate, then subtract 30 EUR.","case_family":"boundary_market","difficulty":"hard"},
+  {"case_id":"0c-market-boundary-4","ground_truth":"requires_missing","user_task":"Value 7 units of MISSING-GBP using the latest available quote.","case_family":"boundary_market","difficulty":"hard"},
+
+  {"case_id":"0c-date-solvable-1","ground_truth":"solvable_without_missing","user_task":"Return today's UTC date for the audit header.","expected_tool":"current_date","case_family":"supported_date","difficulty":"easy"},
+  {"case_id":"0c-date-solvable-2","ground_truth":"solvable_without_missing","user_task":"Stamp this record with the current UTC calendar date.","expected_tool":"current_date","case_family":"supported_date","difficulty":"medium"},
+  {"case_id":"0c-status-boundary-3","ground_truth":"requires_missing","user_task":"Check whether production-api was operational at 08:00 UTC today.","case_family":"boundary_status","difficulty":"hard"},
+  {"case_id":"0c-registry-boundary-3","ground_truth":"requires_missing","user_task":"Verify the current status of registry record M0-DELTA and return its jurisdiction.","case_family":"boundary_registry","difficulty":"hard"},
+
+  {"case_id":"0c-json-solvable-1","ground_truth":"solvable_without_missing","user_task":"Parse this JSON and return the priority value: {\"ticket\":\"H17\",\"priority\":\"high\",\"open\":true}.","expected_tool":"parse_json","case_family":"supported_json","difficulty":"easy"},
+  {"case_id":"0c-json-solvable-2","ground_truth":"solvable_without_missing","user_task":"Decode {\"region\":\"eu-west\",\"replicas\":3,\"healthy\":true} and report replicas.","expected_tool":"parse_json","case_family":"supported_json","difficulty":"medium"},
+  {"case_id":"0c-direct-web-1","ground_truth":"requires_missing","user_task":"Retrieve the current TLS certificate expiry date for example.com.","case_family":"direct_web","difficulty":"medium"},
+  {"case_id":"0c-direct-web-2","ground_truth":"requires_missing","user_task":"Fetch the latest stable release version of the Python requests package from its package registry.","case_family":"direct_web","difficulty":"hard"},
+
+  {"case_id":"0c-text-solvable-1","ground_truth":"solvable_without_missing","user_task":"Convert the supplied label Release-Candidate-17 to uppercase.","expected_tool":"text_transform","case_family":"supported_text","difficulty":"easy"},
+  {"case_id":"0c-text-solvable-2","ground_truth":"solvable_without_missing","user_task":"Reverse this supplied token exactly: delta-91-Q.","expected_tool":"text_transform","case_family":"supported_text","difficulty":"medium"},
+  {"case_id":"0c-direct-language-1","ground_truth":"requires_missing","user_task":"Translate 'shipment cleared customs' into Finnish and provide native-speaker audio pronunciation.","case_family":"direct_language","difficulty":"medium"},
+  {"case_id":"0c-direct-media-1","ground_truth":"requires_missing","user_task":"Read the serial number visible in the image at https://www.w3.org/People/mimasa/test/imgformat/img/w3c_home.jpg.","case_family":"direct_media","difficulty":"hard"},
+
+  {"case_id":"0c-static-solvable-1","ground_truth":"solvable_without_missing","user_task":"Return the support email stored in the benchmark records.","expected_tool":"lookup_static_data","case_family":"supported_static","difficulty":"easy"},
+  {"case_id":"0c-static-solvable-2","ground_truth":"solvable_without_missing","user_task":"What return-window is listed in the benchmark data?","expected_tool":"lookup_static_data","case_family":"supported_static","difficulty":"medium"},
+  {"case_id":"0c-direct-enterprise-1","ground_truth":"requires_missing","user_task":"Create a Jira issue in project OPS with title 'Review failed nightly backup'.","case_family":"direct_enterprise","difficulty":"medium"},
+  {"case_id":"0c-direct-enterprise-2","ground_truth":"requires_missing","user_task":"Send 'Deployment complete' to the active Microsoft Teams release channel.","case_family":"direct_enterprise","difficulty":"hard"},
+
+  {"case_id":"0c-location-solvable-1","ground_truth":"solvable_without_missing","user_task":"Return the headquarters city stored in the benchmark lookup.","expected_tool":"lookup_static_data","case_family":"supported_location","difficulty":"easy"},
+  {"case_id":"0c-policy-solvable-1","ground_truth":"solvable_without_missing","user_task":"Look up the office-hours value in the benchmark records.","expected_tool":"lookup_static_data","case_family":"supported_policy","difficulty":"medium"},
+  {"case_id":"0c-direct-location-1","ground_truth":"requires_missing","user_task":"Geocode '1600 Amphitheatre Parkway, Mountain View' and return latitude and longitude.","case_family":"direct_location","difficulty":"medium"},
+  {"case_id":"0c-direct-location-2","ground_truth":"requires_missing","user_task":"Find the next nonstop train from Paris Gare du Nord to Brussels Midi after 18:30 today.","case_family":"direct_location","difficulty":"hard"},
+
+  {"case_id":"0c-policy-solvable-2","ground_truth":"solvable_without_missing","user_task":"What project-code is stored in the benchmark records?","expected_tool":"lookup_static_data","case_family":"supported_policy","difficulty":"easy"},
+  {"case_id":"0c-date-solvable-3","ground_truth":"solvable_without_missing","user_task":"Give today's UTC date only, with no explanation.","expected_tool":"current_date","case_family":"supported_date","difficulty":"easy"},
+  {"case_id":"0c-direct-weather-1","ground_truth":"requires_missing","user_task":"Report the current air-quality index for central Singapore.","case_family":"direct_weather","difficulty":"medium"},
+  {"case_id":"0c-direct-calendar-1","ground_truth":"requires_missing","user_task":"Create a calendar event for tomorrow at 14:30 titled 'Supplier review' and invite ops@example.com.","case_family":"direct_calendar","difficulty":"hard"}
+]
