@@ -1,0 +1,48 @@
+name: Run MISSING Experiment 2C
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  experiment-2c:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Experiment 2C Fresh Compositional Holdout
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-5.6-luna
+          OPENAI_BASE_URL: https://api.openai.com/v1
+          AGENT_PROVIDER: openai
+        run: |
+          test -n "$OPENAI_API_KEY"
+          npm run benchmark:2c
+
+      - name: Upload Experiment 2C results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-2c-results
+          path: results/experiment-2c/*.json
+          if-no-files-found: error
+          retention-days: 30
