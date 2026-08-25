@@ -19,6 +19,6 @@ describe("Experiment 2A preregistration",()=>{
     expect(readme).toContain("reuse pass rate >= **90%**");
     expect(readme).toContain("LLM calls during reuse = **0**");
     expect(readme).toContain("source-policy violations = **0**");
-    expect(readme).toContain("one repair call");
+    expect(readme).toContain("may make **one** repair call");
   });
 });
