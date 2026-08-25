@@ -1,0 +1,48 @@
+name: Run MISSING Experiment 1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  experiment-1-real:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Experiment 1 Capability Genesis
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-4.1-mini
+          OPENAI_BASE_URL: https://api.openai.com/v1
+          AGENT_PROVIDER: openai
+        run: |
+          test -n "$OPENAI_API_KEY"
+          npm run benchmark:1
+
+      - name: Upload Experiment 1 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-1-results
+          path: results/experiment-1/*.json
+          if-no-files-found: error
+          retention-days: 30
