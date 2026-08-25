@@ -1,0 +1,21 @@
+[
+  {"event_id":"npm-1","buyer_id":"buyer-a","user_task":"For any npm package name, return the latest stable version currently published.","max_unit_price_usd":0.005,"committed_calls_30d":200,"gold_cluster":"latest_npm_package_version"},
+  {"event_id":"npm-2","buyer_id":"buyer-b","user_task":"I need a reusable capability that accepts an npm package and gives me its current latest release version.","max_unit_price_usd":0.006,"committed_calls_30d":200,"gold_cluster":"latest_npm_package_version"},
+  {"event_id":"npm-3","buyer_id":"buyer-c","user_task":"Given a package such as lodash or express, look up the newest stable version in npm and return only the version.","max_unit_price_usd":0.004,"committed_calls_30d":200,"gold_cluster":"latest_npm_package_version"},
+  {"event_id":"npm-4","buyer_id":"buyer-d","user_task":"Resolve an npm package name to the latest published stable semver.","max_unit_price_usd":0.005,"committed_calls_30d":200,"gold_cluster":"latest_npm_package_version"},
+
+  {"event_id":"mx-1","buyer_id":"buyer-e","user_task":"Given a domain, return its current MX records and priorities.","max_unit_price_usd":0.005,"committed_calls_30d":100,"gold_cluster":"dns_mx_records"},
+  {"event_id":"mx-2","buyer_id":"buyer-f","user_task":"I need a domain-to-mail-exchanger lookup capability including MX preference values.","max_unit_price_usd":0.006,"committed_calls_30d":100,"gold_cluster":"dns_mx_records"},
+  {"event_id":"mx-3","buyer_id":"buyer-g","user_task":"Resolve the live DNS MX set for an arbitrary hostname.","max_unit_price_usd":0.004,"committed_calls_30d":100,"gold_cluster":"dns_mx_records"},
+
+  {"event_id":"uv-1","buyer_id":"buyer-h","user_task":"Given a city, report its current UV index.","max_unit_price_usd":0.006,"committed_calls_30d":100,"gold_cluster":"current_uv_index"},
+  {"event_id":"uv-2","buyer_id":"buyer-i","user_task":"I need live ultraviolet index data for arbitrary locations.","max_unit_price_usd":0.005,"committed_calls_30d":100,"gold_cluster":"current_uv_index"},
+  {"event_id":"uv-3","buyer_id":"buyer-j","user_task":"Resolve a place name to the current UV exposure index.","max_unit_price_usd":0.005,"committed_calls_30d":100,"gold_cluster":"current_uv_index"},
+
+  {"event_id":"yaml-1","buyer_id":"buyer-k","user_task":"Parse supplied YAML text and return a structured JSON value.","max_unit_price_usd":0.001,"committed_calls_30d":500,"gold_cluster":"parse_yaml"},
+  {"event_id":"yaml-2","buyer_id":"buyer-l","user_task":"Convert arbitrary YAML input into equivalent JSON.","max_unit_price_usd":0.001,"committed_calls_30d":500,"gold_cluster":"parse_yaml"},
+  {"event_id":"yaml-3","buyer_id":"buyer-m","user_task":"Accept a YAML document and emit its parsed object representation.","max_unit_price_usd":0.001,"committed_calls_30d":500,"gold_cluster":"parse_yaml"},
+
+  {"event_id":"email-1","buyer_id":"buyer-n","user_task":"Send an email to a supplied recipient with a subject and body.","max_unit_price_usd":0.01,"committed_calls_30d":100,"gold_cluster":"send_email"},
+  {"event_id":"email-2","buyer_id":"buyer-o","user_task":"I need a capability that can deliver outbound email messages to arbitrary addresses.","max_unit_price_usd":0.01,"committed_calls_30d":100,"gold_cluster":"send_email"}
+]
