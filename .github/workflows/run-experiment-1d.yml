@@ -1,0 +1,29 @@
+name: Run MISSING Experiment 1D
+
+on:
+  workflow_dispatch:
+
+jobs:
+  experiment-1d:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Run Experiment 1D
+        run: npm run benchmark:1d
+      - name: Upload Experiment 1D results
+        uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-1d-results
+          path: results/experiment-1d/*.json
+          if-no-files-found: error
+          retention-days: 30
