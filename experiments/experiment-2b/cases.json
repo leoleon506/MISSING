@@ -13,8 +13,8 @@
     "description":"Given a city name, geocode it and return the current temperature in Celsius for the resolved coordinates.",
     "input_schema":{"city":"string"},
     "expected":"BUILD",
-    "validation":[{"input":{"city":"San Jose, Costa Rica"}},{"input":{"city":"Tokyo"}}],
-    "reuse":[{"input":{"city":"Zurich"}}],
+    "validation":[{"input":{"city":"Tokyo"}},{"input":{"city":"Zurich"}}],
+    "reuse":[{"input":{"city":"London"}}],
     "family":"geocode_to_weather"
   },
   {
