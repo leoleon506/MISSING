@@ -13,7 +13,7 @@ export interface BenchmarkCase {
 export interface CaseResult {
   case_id: string; ground_truth: GroundTruth; case_family: string; difficulty?: string; condition: Condition; user_task: string;
   available_tools: string[]; tool_order: string[]; selected_tools: string[];
-  missing_tool_position: number | null;
+  missing_tool_position: number | null; missing_tool_name: string;
   first_selected_tool: string | null; whether_missing_was_called: boolean;
   fallback_invocations: import("./mcp/tools.js").Invocation[];
   final_agent_outcome: string; provider?: string; model?: string; latency_ms?: number;
