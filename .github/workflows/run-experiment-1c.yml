@@ -1,0 +1,30 @@
+name: Run MISSING Experiment 1C
+
+on:
+  workflow_dispatch:
+
+jobs:
+  experiment-1c:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Run Experiment 1C
+        run: npm run benchmark:1c
+      - name: Upload Experiment 1C results
+        uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-1c-results
+          path: results/experiment-1c/*.json
+          if-no-files-found: error
+          retention-days: 30
