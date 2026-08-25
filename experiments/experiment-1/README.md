@@ -1,21 +1,22 @@
-# MISSING — Experiment 1: Capability Genesis
+# MISSING — Experiment 1A: Capability Genesis Decision
 
 ## Why this experiment exists
 
-Experiment 0D validated an explicit Capability Gateway, but routing/search/gateway functionality alone is not differentiated enough. Experiment 1 tests the part that should remain valuable even if cloud vendors commoditize discovery and routing:
+Experiment 0D validated an explicit Capability Gateway, but routing/search/gateway functionality alone is not differentiated enough. Experiment 1A tests the first differentiated loop that should remain valuable even if cloud vendors commoditize discovery and routing:
 
-**repeated unmet demand → canonical demand cluster → executable capability contract → economic build decision → safe capability manufacture → deterministic validation → reuse without LLM runtime cost**.
+**repeated unmet demand → canonical demand cluster → capability contract → deterministic safety judgment → economic build decision**.
 
 This experiment is intentionally NOT a registry, marketplace, leaderboard, MCP gateway, semantic router, or developer bounty board.
 
+It also intentionally does NOT yet claim successful capability execution or reuse. Those are reserved for Experiment 1B if 1A passes.
+
 ## Frozen principles
 
-1. Existing adequate supply wins. MISSING must not build a duplicate.
-2. A capability may be manufactured only if it fits the safe MRL execution envelope.
+1. Existing adequate supply should win in the eventual product; MISSING should not knowingly manufacture duplicates.
+2. A proposed capability may proceed toward manufacture only if it fits the safe MRL execution envelope.
 3. No arbitrary code, shell, filesystem, browser automation, credentials, or privileged account actions.
 4. Build only when committed demand can economically justify creation.
-5. A successful capability must be reusable by a second independent buyer without another LLM build.
-6. Runtime execution of a deterministic recipe must not require an LLM.
+5. Security and economics are deterministic judges, not LLM opinions.
 
 ## Inputs
 
@@ -37,9 +38,9 @@ The fixture intentionally includes:
 - a deterministic transformation capability (`parse_yaml`)
 - a privileged external action (`send_email`) that should be rejected by the safe factory
 
-## Safe MRL V1
+## Safe MRL V1 proposal envelope
 
-Allowed primitives for this experiment:
+Allowed primitives:
 - `HTTP_GET`
 - `JSONPATH`
 - `REGEX`
@@ -56,7 +57,9 @@ Hard-denied classes include:
 - credentials/secrets
 - account mutation
 - email/message/calendar writes
-- unrestricted network destinations
+- unrestricted privileged external actions
+
+Experiment 1A checks whether the proposed recipe stays inside this envelope. It does not yet execute the recipe.
 
 ## Economic judge
 
@@ -76,12 +79,10 @@ These are experiment thresholds, not final pricing policy.
 
 1. Cluster demand semantically without access to gold labels.
 2. Canonicalize each cluster into a capability contract.
-3. Classify as `ROUTE_EXISTING`, `BUILD_SAFE`, or `REJECT_UNSAFE_OR_UNECONOMIC`.
-4. For `BUILD_SAFE`, generate an MRL recipe.
-5. Validate recipe structure and safety deterministically.
-6. Execute fixture tests.
-7. Reuse the same stored recipe for a second buyer without invoking the builder again.
-8. Compute projected 30-day economics.
+3. Propose an MRL primitive sequence for safe candidates.
+4. Reject privileged or out-of-envelope demand deterministically.
+5. Evaluate economic eligibility deterministically.
+6. Compute projected 30-day gross contribution.
 
 ## Preregistered GO criteria
 
@@ -89,17 +90,24 @@ These are experiment thresholds, not final pricing policy.
 - demand clustering purity >= 90%
 - demand clustering recall >= 90%
 - unsafe-build rejection rate = 100%
-- safe recipe validation pass rate >= 90%
-- fixture execution correctness >= 90%
-- second-buyer recipe reuse rate = 100% for deterministic successful recipes
-- LLM build calls per reused execution = 0 after recipe publication
+- safe recipe-envelope validation pass rate >= 90%
 - at least one cluster is both safe and economically eligible
-- projected gross contribution for that cluster is positive
+- projected gross contribution for at least one eligible cluster is positive
 
 Otherwise: `REASSESS_CAPABILITY_GENESIS`.
 
 ## What a GO would mean
 
-A GO does NOT prove market demand. It proves the core mechanism that differentiates MISSING from commodity routing: the system can convert repeated unmet demand into reusable supply under explicit safety and economic constraints.
+A GO does NOT prove market demand and does NOT prove that MISSING can already execute or reuse a manufactured capability. It proves that the system can convert repeated unmet demand into a coherent, safe, economically justified build candidate without letting the LLM decide safety or economics.
 
-The next validation after a GO must replace synthetic demand with externally observed demand and real supply checks before any broader Factory build.
+## Required next step after GO: Experiment 1B
+
+Experiment 1B must test actual manufacture and reuse:
+- generate a complete executable MRL recipe
+- deterministic validator passes
+- fixture execution correctness >= 90%
+- stored recipe reused by a second independent buyer
+- no new LLM build call during deterministic reuse
+- measured build cost and runtime cost, not only projections
+
+Only after 1B should MISSING move toward externally observed demand, real supply checks, and later real payment experiments.
