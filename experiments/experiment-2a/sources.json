@@ -1,0 +1,34 @@
+[
+  {
+    "source_id":"npm_package_meta",
+    "description":"Read public npm registry metadata for one package.",
+    "method":"GET",
+    "url_template":"https://registry.npmjs.org/{package}",
+    "parameters":["package"],
+    "exports":{"latest_version":"dist-tags.latest","repository_url":"repository.url"}
+  },
+  {
+    "source_id":"github_repo_meta",
+    "description":"Read public GitHub repository metadata.",
+    "method":"GET",
+    "url_template":"https://api.github.com/repos/{owner}/{repo}",
+    "parameters":["owner","repo"],
+    "exports":{"stargazers_count":"stargazers_count"}
+  },
+  {
+    "source_id":"github_repo_from_url",
+    "description":"Read public GitHub repository metadata from a GitHub repository URL discovered by an earlier source step.",
+    "method":"GET",
+    "url_template":"https://api.github.com/repos/{repository_path}",
+    "parameters":["repository_path"],
+    "exports":{"stargazers_count":"stargazers_count"}
+  },
+  {
+    "source_id":"restcountries_alpha",
+    "description":"Read public country metadata by ISO alpha-2 code.",
+    "method":"GET",
+    "url_template":"https://restcountries.com/v3.1/alpha/{country_code}?fields=currencies",
+    "parameters":["country_code"],
+    "exports":{"currencies":"currencies"}
+  }
+]
