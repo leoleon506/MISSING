@@ -1,6 +1,6 @@
 {
   "name":"missing-experiment-0","version":"0.2.0","private":true,"type":"module",
-  "scripts":{"build":"tsc -p tsconfig.json","test":"vitest run","benchmark":"tsx src/cli.ts","benchmark:0b":"tsx src/experiment0b.ts","benchmark:0b2":"tsx src/experiment0b2.ts","benchmark:0c":"tsx src/experiment0c.ts","benchmark:0d":"tsx src/experiment0d.ts","benchmark:1":"tsx src/experiment1.ts","benchmark:1b":"tsx src/experiment1b.ts","benchmark:1c":"tsx src/experiment1c.ts","benchmark:1d":"tsx src/experiment1d.ts","benchmark:1e":"tsx src/experiment1e.ts","mcp":"tsx src/mcp/server.ts"},
+  "scripts":{"build":"tsc -p tsconfig.json","test":"vitest run","benchmark":"tsx src/cli.ts","benchmark:0b":"tsx src/experiment0b.ts","benchmark:0b2":"tsx src/experiment0b2.ts","benchmark:0c":"tsx src/experiment0c.ts","benchmark:0d":"tsx src/experiment0d.ts","benchmark:1":"tsx src/experiment1.ts","benchmark:1b":"tsx src/experiment1b.ts","benchmark:1c":"tsx src/experiment1c.ts","benchmark:1d":"tsx src/experiment1d.ts","benchmark:1e":"tsx src/experiment1e.ts","benchmark:2a":"tsx src/experiment2a.ts","mcp":"tsx src/mcp/server.ts"},
   "dependencies":{"@modelcontextprotocol/client":"^2.0.0","@modelcontextprotocol/server":"^2.0.0","zod":"^4.0.0"},
   "devDependencies":{"@types/node":"^22.18.1","tsx":"^4.20.5","typescript":"^5.9.2","vitest":"^3.2.4"}
 }
