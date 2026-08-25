@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { secondaryRecoveryRate, coverageBoundarySuccessRate } from "../src/experiment0b-metrics.js";
 import type { CaseResult } from "../src/types.js";
 
-function row(case_id:string, first:string|null, selected:string[], called:boolean):CaseResult{
+function row(case_id:string, first:string|null, selected:string[], called:boolean, missingToolName="resolve_missing_capability"):CaseResult{
   return {
     case_id,
     ground_truth:"requires_missing",
@@ -13,6 +13,7 @@ function row(case_id:string, first:string|null, selected:string[], called:boolea
     tool_order:[],
     selected_tools:selected,
     missing_tool_position:0,
+    missing_tool_name:missingToolName,
     first_selected_tool:first,
     whether_missing_was_called:called,
     fallback_invocations:[],
@@ -31,6 +32,15 @@ describe("Experiment 0B metrics",()=>{
       row("d",null,[],false)
     ];
     expect(secondaryRecoveryRate(results)).toBeCloseTo(1/3);
+  });
+
+  it("uses each result's configured fallback tool name",()=>{
+    const results=[
+      row("a","fallback_for_unavailable_capability",["fallback_for_unavailable_capability"],true,"fallback_for_unavailable_capability"),
+      row("b","calculator",["calculator","fallback_for_unavailable_capability"],true,"fallback_for_unavailable_capability"),
+      row("c","calculator",["calculator"],false,"fallback_for_unavailable_capability")
+    ];
+    expect(secondaryRecoveryRate(results)).toBeCloseTo(1/2);
   });
 
   it("measures success on the three preregistered coverage-boundary cases",()=>{
