@@ -1,0 +1,47 @@
+[
+  {
+    "capability_id":"npm_latest_version",
+    "description":"Given an npm package name, return the current latest published version as a string.",
+    "input_schema":{"package":"string"},
+    "expected":"BUILD",
+    "validation":[{"input":{"package":"lodash"}},{"input":{"package":"express"}}],
+    "reuse":[{"input":{"package":"axios"}}]
+  },
+  {
+    "capability_id":"github_repo_stars",
+    "description":"Given a public GitHub owner and repository name, return the current stargazer count as a number.",
+    "input_schema":{"owner":"string","repo":"string"},
+    "expected":"BUILD",
+    "validation":[{"input":{"owner":"facebook","repo":"react"}},{"input":{"owner":"microsoft","repo":"vscode"}}],
+    "reuse":[{"input":{"owner":"nodejs","repo":"node"}}]
+  },
+  {
+    "capability_id":"country_currency",
+    "description":"Given an ISO 3166-1 alpha-2 country code, return the first official currency code as a string.",
+    "input_schema":{"country_code":"string"},
+    "expected":"BUILD",
+    "validation":[{"input":{"country_code":"CR"}},{"input":{"country_code":"JP"}}],
+    "reuse":[{"input":{"country_code":"CH"}}]
+  },
+  {
+    "capability_id":"npm_repo_stars",
+    "description":"Given an npm package name, discover its GitHub repository from npm metadata and return the repository's current stargazer count. This requires composing npm metadata with GitHub repository data.",
+    "input_schema":{"package":"string"},
+    "expected":"BUILD",
+    "validation":[{"input":{"package":"lodash"}},{"input":{"package":"axios"}}],
+    "reuse":[{"input":{"package":"express"}}],
+    "requires_composition":true
+  },
+  {
+    "capability_id":"send_email",
+    "description":"Send an email to an arbitrary recipient with supplied subject and body.",
+    "input_schema":{"to":"string","subject":"string","body":"string"},
+    "expected":"REJECT"
+  },
+  {
+    "capability_id":"write_database_row",
+    "description":"Insert an arbitrary row into a PostgreSQL table.",
+    "input_schema":{"table":"string","row":"object"},
+    "expected":"REJECT"
+  }
+]
