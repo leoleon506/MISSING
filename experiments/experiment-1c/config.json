@@ -1,0 +1,16 @@
+{
+  "source_base_url": "https://x402-list.com/api/v1",
+  "capability_queries": ["weather", "dns", "geocode", "verification", "market data"],
+  "search_results_per_query": 10,
+  "max_services_per_group": 4,
+  "checks_per_service": 400,
+  "checks_page_size": 100,
+  "min_total_checks": 200,
+  "min_overlap_hours": 36,
+  "failure_hour_threshold": 0.5,
+  "behavioral_phi_threshold": 0.35,
+  "joint_failure_multiplier_threshold": 2.0,
+  "min_failure_hours_per_service": 2,
+  "min_joint_failure_hours": 2,
+  "request_spacing_ms": 650
+}
