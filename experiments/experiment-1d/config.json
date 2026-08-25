@@ -1,0 +1,12 @@
+{
+  "source_base_url": "https://x402-list.com/api/v1",
+  "days": 365,
+  "changes_per_page": 100,
+  "services_per_page": 100,
+  "request_spacing_ms": 300,
+  "min_change_events": 50,
+  "min_changed_services": 20,
+  "min_schema_changes": 10,
+  "min_repeat_churn_services": 5,
+  "min_changed_service_share": 0.03
+}
