@@ -1,0 +1,17 @@
+{
+  "source_base_url": "https://x402-list.com/api/v1",
+  "queries": [
+    "weather forecast",
+    "geocode",
+    "email verification",
+    "crypto market data",
+    "company intelligence",
+    "token risk"
+  ],
+  "results_per_query": 20,
+  "request_spacing_ms": 300,
+  "min_paid_candidates_per_family": 2,
+  "min_qualifying_families": 3,
+  "min_spread_ratio": 1.5,
+  "min_absolute_spread_usd": 0.0005
+}
