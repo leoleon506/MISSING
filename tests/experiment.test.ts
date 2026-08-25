@@ -11,10 +11,8 @@ describe("Experiment 0",()=>{
   arguments: { registry_id: "M0-BETA" }
 });
 
-expect(unsupportedResult.isError).toBe(true);
-expect(unsupportedResult.content[0].text).toContain(
-  "Input validation error"
-);await Promise.all([client.close(),server.close()]);});
+expect(unsupportedResult).toMatchObject({isError:true});
+expect(unsupportedResult.content[0].text).toMatch(/input validation error/i);await Promise.all([client.close(),server.close()]);});
  it("loads exactly balanced, diverse cases",async()=>{const cases=await loadCases(fixture);expect(cases).toHaveLength(66);expect(cases.filter(c=>c.ground_truth==="requires_missing")).toHaveLength(33);expect(cases.filter(c=>c.ground_truth==="solvable_without_missing")).toHaveLength(33);expect(new Set(cases.map(c=>c.case_family)).size).toBeGreaterThanOrEqual(15);});
  it("keeps evaluator metadata outside the agent boundary",async()=>{const c=(await loadCases(fixture))[0],visible=agentVisibleCase(c);expect(visible).toEqual({user_task:c.user_task});expect(JSON.stringify(visible)).not.toMatch(/ground_truth|case_family|difficulty|expected_tool/);});
  it("preserves matched normal order and seeds MISSING insertion",async()=>{const cases=(await loadCases(fixture)).slice(0,2);const a=await runBenchmark(cases,mock,{seed:23,description:"test",runType:"infrastructure-mock"});const b=await runBenchmark(cases,mock,{seed:23,description:"test",runType:"infrastructure-mock"});for(const c of cases){const pair=a.results.filter(r=>r.case_id===c.case_id);const control=pair.find(r=>r.condition==="control")!,missing=pair.find(r=>r.condition==="missing")!;expect(missing.tool_order.filter(n=>n!=="resolve_missing_capability")).toEqual(control.tool_order);expect(missing.tool_order[missing.missing_tool_position!]).toBe("resolve_missing_capability");}expect(a.results.map(r=>[r.condition,r.tool_order,r.missing_tool_position])).toEqual(b.results.map(r=>[r.condition,r.tool_order,r.missing_tool_position]));});
