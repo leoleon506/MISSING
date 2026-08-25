@@ -18,6 +18,6 @@ describe("Experiment 1C preregistration",()=>{
   it("documents the health-check limitation and conservative decision",()=>{
     expect(readme).toContain("availability/handshake correlation");
     expect(readme).toContain("INSUFFICIENT_REAL_EVIDENCE");
-    expect(readme).toContain("does not yet prove shared infrastructure causality");
+    expect(readme).toContain("would not yet prove shared infrastructure causality");
   });
 });
