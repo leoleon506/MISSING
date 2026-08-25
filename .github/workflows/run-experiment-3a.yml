@@ -1,0 +1,41 @@
+name: Run MISSING Experiment 3A
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  experiment-3a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Experiment 3A Primitive Contract Gate
+        run: npm run benchmark:3a
+
+      - name: Upload Experiment 3A results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-3a-results
+          path: results/experiment-3a/*.json
+          if-no-files-found: error
+          retention-days: 30
