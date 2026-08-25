@@ -4,10 +4,9 @@ import { pathToFileURL } from "node:url";
 import { loadConfig } from "../config/index.js";
 import { executeNormalTool, fallbackEvent, missingSpecification, toolSpecifications, type InvocationRecorder } from "./tools.js";
 
-export interface BenchmarkServerOptions { includeMissing: boolean; missingDescription: string; recorder?: InvocationRecorder; requestId?: string; caseId?: string; }
+export interface BenchmarkServerOptions { includeMissing: boolean; missingDescription: string; missingToolName?: string; recorder?: InvocationRecorder; requestId?: string; caseId?: string; }
 const content = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
 
-/** The sole authoritative registration point for benchmark tool names, descriptions, schemas and implementations. */
 export function createBenchmarkServer(options: BenchmarkServerOptions): McpServer {
   const server = new McpServer({ name: "missing-experiment-0", version: "0.2.0" });
   for (const [name, specification] of Object.entries(toolSpecifications)) {
@@ -15,7 +14,8 @@ export function createBenchmarkServer(options: BenchmarkServerOptions): McpServe
   }
   if (options.includeMissing) {
     let sequence = 0;
-    server.registerTool("resolve_missing_capability", missingSpecification(options.missingDescription), async args => {
+    const missingToolName = options.missingToolName ?? "resolve_missing_capability";
+    server.registerTool(missingToolName, missingSpecification(options.missingDescription), async args => {
       const event = fallbackEvent(args, { requestId: options.requestId, caseId: options.caseId, sequence: ++sequence });
       options.recorder?.(event);
       return content({ status: "capability_not_available", message: "The requested capability is not currently available.", request_id: event.request_id });

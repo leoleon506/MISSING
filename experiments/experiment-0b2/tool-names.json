@@ -1,0 +1,5 @@
+[
+  {"id":"resolve_missing_capability","tool_name":"resolve_missing_capability"},
+  {"id":"request_missing_capability","tool_name":"request_missing_capability"},
+  {"id":"fallback_for_unavailable_capability","tool_name":"fallback_for_unavailable_capability"}
+]

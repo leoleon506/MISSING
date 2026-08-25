@@ -9,7 +9,7 @@ const boundaryIds=new Set([
 
 export function secondaryRecoveryRate(results:CaseResult[]){
   const required=results.filter(r=>r.condition==="missing"&&r.ground_truth==="requires_missing");
-  const opportunities=required.filter(r=>r.first_selected_tool!=="resolve_missing_capability");
+  const opportunities=required.filter(r=>r.first_selected_tool!==r.missing_tool_name);
   const recovered=opportunities.filter(r=>r.whether_missing_was_called).length;
   return ratio(recovered,opportunities.length);
 }
