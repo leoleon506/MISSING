@@ -1,6 +1,7 @@
 import {mkdir,writeFile} from "node:fs/promises";
 import {loadConfig} from "./config/index.js";
-import {CASES,FROZEN_3WR_ARTIFACT,FROZEN_3WR_DIGEST,FROZEN_3WR_RUN,compileFrozenRequest,enforceReplayDeltas,executeProgram,featureSatisfied,provenanceFingerprint,sha,validateCurrencyOutput,validateDecision,type CompileDecision,type SafetyEvent} from "./experiment3xCore.js";
+import {CASES,FROZEN_3WR_ARTIFACT,FROZEN_3WR_DIGEST,FROZEN_3WR_RUN,compileFrozenRequest,enforceReplayDeltas,executeProgram,featureSatisfied,provenanceFingerprint,sha,validateCurrencyOutput,validateDecision,type CompileDecision} from "./experiment3xCore.js";
+import type {SafetyEvent} from "./experiment3wCore.js";
 import {compileProjection} from "./experiment3xPlanner.js";
 import {executeFrozenGet} from "./experiment3xNetwork.js";
 import {run3xControls} from "./experiment3xControls.js";
