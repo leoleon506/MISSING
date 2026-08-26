@@ -17,7 +17,7 @@ const EXISTING_SUPPLY={city_geocode:{capability_id:"city_geocode",description:"U
 const OPS=new Set(["SOURCE","ARRAY_GET","FILTER_EQ","FIRST","SELECT","PROJECT","TRIM","LOWERCASE","OUTPUT"]);
 let plannerCalls=0,repairCalls=0,replayPlannerCalls=0,sourceViolations=0,operationViolations=0,hostViolations=0,redirectsFollowed=0,credentialsSupplied=0,arbitraryCodeExecuted=0,negativeControlAccepted=0;
 
-type Ref="$input.country"|"$capital";
+type Ref = "$input.country"|"$capital";
 type Op={op:string,source_id?:string,args?:Record<string,string>,index?:number,path?:string,ref?:Ref,fields?:string[]};
 type Plan={case_id:string,decision:"ROUTE"|"COMPOSE"|"MANUFACTURE"|"REJECT",reason?:string,ops?:Op[]};
 const sha=(x:any)=>createHash("sha256").update(JSON.stringify(x)).digest("hex");
