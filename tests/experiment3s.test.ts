@@ -1,0 +1,13 @@
+import {describe,expect,it} from "vitest";
+import {readFileSync} from "node:fs";
+import {buildSupplierCandidates,canonicalBaseFromRedirect,recipeHas3SFingerprintEvidence,runNegativeControls,validateRedirect} from "../src/experiment3sCore.js";
+
+const readme=readFileSync("experiments/3s/README.md","utf8"),runner=readFileSync("src/experiment3s.ts","utf8");
+describe("Experiment 3S",()=>{
+  it("freezes the new fallback hypothesis without provider mappings",()=>{expect(readme).toContain("at most **5 distinct supplier candidates per case**");expect(readme).toContain("actual supplier rejection/fallback");expect(readme).toContain("GO_EXECUTION_VERIFIED_CAPABILITY_PROCUREMENT");for(const x of ["dnd5eapi.co","openfintech.io","api.github.com"])expect(runner.toLowerCase()).not.toContain(x);});
+  it("selects the best compatible operation from distinct providers",()=>{const contracts:any[]=[{api_key:"a",operations:[{path:"/x",method:"GET"}]},{api_key:"b",operations:[{path:"/y",method:"GET"}]}];const candidates:any[]=[{api_key:"a",path:"/x",method:"GET",score:10,input_hits:1,output_hits:1},{api_key:"a",path:"/x2",method:"GET",score:9,input_hits:1,output_hits:1},{api_key:"b",path:"/y",method:"GET",score:8,input_hits:1,output_hits:1}];const out=buildSupplierCandidates(candidates,contracts);expect(out.map(x=>x.candidate.api_key)).toEqual(["a","b"]);});
+  it("allows only one path-preserving HTTPS canonical redirect",()=>{expect(validateRedirect("https://a.test/v1/x?q=1","https://b.test/v1/x?q=1",0).ok).toBe(true);expect(validateRedirect("https://a.test/v1/x","http://b.test/v1/x",0).ok).toBe(false);expect(validateRedirect("https://a.test/v1/x","https://b.test/v2/x",0).ok).toBe(false);expect(validateRedirect("https://a.test/v1/x","https://b.test/v1/x",1).reason).toBe("redirect_chain_rejected");expect(canonicalBaseFromRedirect("https://b.test/v1/items/42","/items/42")).toBe("https://b.test/v1");});
+  it("executes all fifteen negative controls",()=>{const controls=runNegativeControls();expect(controls).toHaveLength(15);expect(controls.every(x=>x.executed&&x.rejected)).toBe(true);});
+  it("requires verification trace in recipe evidence",()=>{const base:any={spec_fingerprint:"s",discovery_descriptor_fingerprint:"d",verification_trace_fingerprint:"v",recipe_fingerprint:"r"};expect(recipeHas3SFingerprintEvidence([base,{...base,recipe_fingerprint:"r2"}])).toBe(true);expect(recipeHas3SFingerprintEvidence([base,{...base,verification_trace_fingerprint:""}])).toBe(false);});
+  it("freezes zero-control-call replay",()=>{for(const x of ["registry fetch calls = 0","specification fetch calls = 0","procurement-planner calls = 0","projection-induction calls = 0"])expect(readme).toContain(x);});
+});
