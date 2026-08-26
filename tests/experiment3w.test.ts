@@ -4,6 +4,7 @@ import {FROZEN_PROVIDERS,compileMicroRequest,docScopeAllowed,projectMicro,valida
 import {EXEC_CASES} from "../src/experiment3rCore.js";
 import {run3wControls} from "../src/experiment3wControls.js";
 
+// This suite intentionally validates frozen preregistration boundaries before any live 3W run.
 const prereg=readFileSync("experiments/3w/README.md","utf8");
 describe("Experiment 3W",()=>{
  it("freezes the exact 3V provider population",()=>{expect(FROZEN_PROVIDERS).toHaveLength(10);expect(FROZEN_PROVIDERS.filter(x=>x.case_id==="currency_metadata")).toHaveLength(8);expect(FROZEN_PROVIDERS.some(x=>x.name==="Code.gov")).toBe(true);expect(FROZEN_PROVIDERS.some(x=>x.name.includes("Dungeons and Dragons"))).toBe(true);});
