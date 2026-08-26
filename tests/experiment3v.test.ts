@@ -4,6 +4,7 @@ import {BROAD_TOP_K,RERANK_TOP_K,broadRetrieve,plannerVisibleCandidates,relevant
 import {parseRerankAttempt} from "../src/experiment3vPlanner.js";
 import {runNegativeControls} from "../src/experiment3vControls.js";
 
+// Pre-run regression coverage for semantic provider retrieval contracts.
 const readme=readFileSync("experiments/3v/README.md","utf8"),runner=readFileSync("src/experiment3v.ts","utf8");
 describe("Experiment 3V",()=>{
   it("freezes top80 to opaque top12 semantic retrieval",()=>{expect(BROAD_TOP_K).toBe(80);expect(RERANK_TOP_K).toBe(12);expect(readme).toContain("top **80** entries per case");expect(readme).toContain("at most **12 opaque candidate IDs**");});
