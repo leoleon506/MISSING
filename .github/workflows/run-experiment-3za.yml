@@ -1,0 +1,29 @@
+name: Run MISSING Experiment 3Z-A
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  experiment-3za:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run benchmark:3za
+      - uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-3za-results
+          path: results/experiment-3za/*.json
+          if-no-files-found: error
+          retention-days: 30
