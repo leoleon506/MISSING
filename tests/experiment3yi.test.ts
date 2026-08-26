@@ -1,0 +1,9 @@
+import {describe,expect,it} from "vitest";
+import {RecoveryLedger} from "../src/experiment3yrCore.js";
+import {contractTo3xProgram,executeIntegrationProjection,validateIntegrationContract} from "../src/experiment3yiCore.js";
+
+describe("Experiment 3Y-I integration recovery",()=>{
+ it("maps direct output paths into the real 3X FIELD program",()=>{const c:any={decision:"COMPILE",output_paths:{code:"cca2",name:"name.common"}};const p=contractTo3xProgram(c,["code","name"]);expect(p.code).toEqual({op:"FIELD",path:"cca2"});expect(p.name).toEqual({op:"FIELD",path:"name.common"});});
+ it("executes nested FIELD projection through 3X interpreter",()=>{const c:any={decision:"COMPILE",output_paths:{code:"cca2",name:"name.common"}};expect(executeIntegrationProjection(c,"country_metadata",{cca2:"CR",name:{common:"Costa Rica"}},{country_id:"CR"})).toEqual({code:"CR",name:"Costa Rica"});});
+ it("rejects invented output fields from evidence",()=>{const l=new RecoveryLedger(),provider:any={case_id:"country_metadata",candidate_id:"p1",name:"X",start_url:"https://x.example"},evidence:any[]=[{evidence_id:"e1",provider_candidate_id:"p1",requested_url:"https://x.example",resolved_url:"https://x.example",verified_at:new Date().toISOString(),status:200,content_type:"text/plain",body_fingerprint:"x",text:"GET https://api.example/country/{code}. JSON response fields cca2 and name.",state:"ok"}],contract:any={case_id:"country_metadata",provider_candidate_id:"p1",decision:"COMPILE",method:"GET",base_url:"https://api.example",path_template:"/country/{code}",path_bindings:{code:"$input.country_id"},query_bindings:{},output_paths:{code:"invented",name:"name"},evidence_ids:["e1"]};const v=validateIntegrationContract(contract,provider,evidence,l);expect(v.errors.some(x=>x.includes("invented_output_field"))).toBe(true);});
+});
