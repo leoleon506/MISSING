@@ -1,0 +1,18 @@
+import {createHash} from "node:crypto";
+import type {CaseDef} from "./experiment3qCore.js";
+import {parsePublicApis,type PublicApiEntry} from "./experiment3tCore.js";
+
+export const BROAD_TOP_K=80,RERANK_TOP_K=12;
+export type ProviderCandidate={candidate_id:string;lexical_rank:number;name:string;description:string;category:string;auth:string;https:string;link:string;score:number};
+export type RerankChoice={candidate_id:string;reason:string};
+export type RerankSelection={case_id:string;selected:RerankChoice[]};
+export const sha=(x:any)=>createHash("sha256").update(typeof x==="string"?x:JSON.stringify(x)).digest("hex");
+function words(s:string){return (String(s).toLowerCase().match(/[a-z0-9]+/g)||[]).filter(x=>x.length>=2);}
+function affinity(a:string,b:string){const q=words(a),d=new Set(words(b));let score=0;for(const w of q)if(d.has(w))score+=2;else if(w.length>=4&&[...d].some(x=>x.length>=4&&(x.includes(w)||w.includes(x))))score+=1;return score;}
+export function broadRetrieve(c:CaseDef,md:string):ProviderCandidate[]{const q=`${c.intent} ${c.input_names.join(" ")} ${c.required_output_leaf_names.join(" ")}`;return parsePublicApis(md).map(e=>({...e,score:affinity(q,`${e.name} ${e.description} ${e.category}`)})).sort((a,b)=>b.score-a.score||a.name.localeCompare(b.name)).slice(0,BROAD_TOP_K).map((e,i)=>({candidate_id:`p${String(i+1).padStart(3,"0")}_${sha(`${c.case_id}|${e.name}|${e.link}`).slice(0,10)}`,lexical_rank:i+1,name:e.name,description:e.description,category:e.category,auth:e.auth,https:e.https,link:e.link,score:e.score}));}
+export function plannerVisibleCandidates(xs:ProviderCandidate[]){return xs.map(({candidate_id,name,description,category,auth,https})=>({candidate_id,name,description,category,auth,https}));}
+export function validateRerankObject(x:any,broad:ProviderCandidate[]){const issues:string[]=[];if(!x||typeof x!=="object"||Array.isArray(x))return {selection:null,error:"rerank_not_object"};const keys=Object.keys(x);for(const k of keys)if(!["case_id","selected"].includes(k))issues.push(`extra:${k}`);if(typeof x.case_id!=="string")issues.push("case_id_type");if(!Array.isArray(x.selected))issues.push("selected_type");const allowed=new Set(broad.map(c=>c.candidate_id)),seen=new Set<string>();if(Array.isArray(x.selected)){if(x.selected.length>RERANK_TOP_K)issues.push("too_many_selected");for(let i=0;i<x.selected.length;i++){const row=x.selected[i];if(!row||typeof row!=="object"||Array.isArray(row)){issues.push(`selected_${i}_type`);continue;}for(const k of Object.keys(row))if(!["candidate_id","reason"].includes(k))issues.push(`selected_${i}_extra:${k}`);if(typeof row.candidate_id!=="string")issues.push(`selected_${i}_candidate_id_type`);else{if(!allowed.has(row.candidate_id))issues.push(`unknown_candidate_id:${row.candidate_id}`);if(seen.has(row.candidate_id))issues.push(`duplicate_candidate_id:${row.candidate_id}`);seen.add(row.candidate_id);}if(typeof row.reason!=="string")issues.push(`selected_${i}_reason_type`);}}
+  return issues.length?{selection:null,error:`rerank_contract_invalid:${issues.join(",")}`}:{selection:{case_id:x.case_id,selected:x.selected} as RerankSelection,error:null};}
+export function resolveSelected(selection:RerankSelection,broad:ProviderCandidate[]){const byId=new Map(broad.map(x=>[x.candidate_id,x]));return selection.selected.map(x=>byId.get(x.candidate_id)!).filter(Boolean);}
+export function relevantOperation(c:any){return c&&c.method==="GET"&&c.input_hits>0&&c.output_hits>0;}
+export function providerSelectionFingerprint(c:CaseDef,selection:RerankSelection){return sha({case_id:c.case_id,selected:selection.selected});}
