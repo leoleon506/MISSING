@@ -1,0 +1,41 @@
+name: Run MISSING Experiment 3E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  experiment-3e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Experiment 3E Safe Read-Only MCP Execution
+        run: npm run benchmark:3e
+
+      - name: Upload Experiment 3E results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-3e-results
+          path: results/experiment-3e/*.json
+          if-no-files-found: error
+          retention-days: 30
