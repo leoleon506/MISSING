@@ -2,10 +2,11 @@ import {mkdir,writeFile} from "node:fs/promises";
 import {loadConfig} from "./config/index.js";
 import {fetchTextBounded} from "./experiment3qNetwork.js";
 import {PUBLIC_APIS_URL,parsePublicApis} from "./experiment3tCore.js";
-import {BROAD_TOP_K,RERANK_TOP_K,broadRetrieve,providerSelectionFingerprint,resolveSelected,type ProviderCandidate} from "./experiment3vCore.js";
+import {BROAD_TOP_K,RERANK_TOP_K,providerSelectionFingerprint,resolveSelected,type ProviderCandidate} from "./experiment3vCore.js";
 import {MAX_DEPTH,MAX_BYTES,extractDocLinks,type DocEvidence,type FrozenProvider,type SafetyEvent} from "./experiment3wCore.js";
 import {fetchDocumentation,verifiedJsonGet} from "./experiment3wNetwork.js";
 import {CASES,assertBlindCases,compileRequest,enforceReplayDeltas,executeProgram,sameRequired,semanticValidate,sha,validateDecision,type CompileDecision,type HoldoutCase,type ProviderRef} from "./experiment3yCore.js";
+import {broadRetrieve3y} from "./experiment3yDiscovery.js";
 import {compileCapability} from "./experiment3yPlanner.js";
 import {call3yProviderReranker,parse3yRerankAttempt} from "./experiment3yProviderPlanner.js";
 import {run3yControls} from "./experiment3yControls.js";
@@ -26,7 +27,7 @@ async function main(){
  await mkdir(OUT,{recursive:true});assertBlindCases();const config=loadConfig();if(!config.apiKey)throw new Error("OPENAI_API_KEY required");
  const started_at=new Date().toISOString(),safety:SafetyEvent[]=[],controlRun=run3yControls(),catalog=await fetchCatalog(),rerankEvidence:any[]=[],compilerEvidence:any[]=[],documentationEvidence:any[]=[],caseResults:any[]=[],recipes:any[]=[],usableDocs=new Set<string>();
  for(const c of CASES){
-  const broad=broadRetrieve(c as any,catalog),r=await rerank(config,c,broad,rerankEvidence);if(!r.selection){caseResults.push({case_id:c.case_id,broad_count:broad.length,rerank_error:r.error,selected:[],attempts:[],recipe:null});continue;}
+  const broad=broadRetrieve3y(c,catalog),r=await rerank(config,c,broad,rerankEvidence);if(!r.selection){caseResults.push({case_id:c.case_id,broad_count:broad.length,rerank_error:r.error,selected:[],attempts:[],recipe:null});continue;}
   const selectionFp=providerSelectionFingerprint(c as any,r.selection),selected=resolveSelected(r.selection,broad),attempts:any[]=[];let recipe:any=null;
   for(const p of selected){
    if(!anonymousHttps(p)){attempts.push({provider_candidate_id:p.candidate_id,provider_name:p.name,status:"ineligible_anonymous_https",auth:p.auth,https:p.https});continue;}
