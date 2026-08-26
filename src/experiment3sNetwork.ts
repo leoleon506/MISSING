@@ -1,11 +1,13 @@
 import {lookup} from "node:dns/promises";
 import {isIP} from "node:net";
+import {createHash} from "node:crypto";
 import {validateRedirect} from "./experiment3sCore.js";
 
 const TIMEOUT_MS=15000;
 function publicIPv4(ip:string){const p=ip.split(".").map(Number);if(p.length!==4||p.some(x=>!Number.isInteger(x)||x<0||x>255))return false;const[a,b,c]=p;if(a===0||a===10||a===127||a>=224)return false;if(a===100&&b>=64&&b<=127)return false;if(a===169&&b===254)return false;if(a===172&&b>=16&&b<=31)return false;if(a===192&&b===168)return false;if(a===192&&b===0&&(c===0||c===2))return false;if(a===198&&(b===18||b===19))return false;if(a===198&&b===51&&c===100)return false;if(a===203&&b===0&&c===113)return false;return true;}
 function publicIPv6(ip:string){const s=ip.toLowerCase();if(s==="::"||s==="::1"||s.startsWith("fc")||s.startsWith("fd")||/^fe[89ab]/.test(s)||s.startsWith("ff")||s.startsWith("2001:db8:"))return false;if(s.startsWith("::ffff:")){const t=s.slice(7);return isIP(t)===4&&publicIPv4(t);}return true;}
 function isPublic(ip:string){return isIP(ip)===4?publicIPv4(ip):isIP(ip)===6?publicIPv6(ip):false;}
+function sha(value:string){return createHash("sha256").update(value).digest("hex");}
 export async function assertPublicHttps(raw:string){const u=new URL(raw);if(u.protocol!=="https:")throw new Error("host_policy_non_https");if(isIP(u.hostname))throw new Error("host_policy_ip_literal");let addrs;try{addrs=await lookup(u.hostname,{all:true,verbatim:true});}catch(e){throw new Error(`dns_unreachable:${u.hostname}:${String(e)}`);}if(!addrs.length||addrs.some(a=>!isPublic(a.address)))throw new Error("host_policy_non_public_dns");return u;}
 async function oneGet(url:string,maxBytes:number){await assertPublicHttps(url);const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),TIMEOUT_MS);try{const r=await fetch(url,{headers:{accept:"application/json, application/vnd.api+json","user-agent":"MISSING-Experiment-3S/0.1"},redirect:"manual",signal:ctrl.signal});const declared=Number(r.headers.get("content-length")||0);if(declared>maxBytes)throw new Error("response_too_large_declared");const text=await r.text();if(Buffer.byteLength(text)>maxBytes)throw new Error("response_too_large");return {status:r.status,ok:r.ok,location:r.headers.get("location"),content_type:r.headers.get("content-type")||"",text};}finally{clearTimeout(timer);}}
 export async function verifyJsonRequest(url:string,maxBytes:number){
@@ -13,5 +15,5 @@ export async function verifyJsonRequest(url:string,maxBytes:number){
   if([301,302,307,308].includes(first.status)){
     if(!first.location)throw new Error("redirect_missing_location");const decision=validateRedirect(url,first.location,0);trace.redirect_decision=decision;if(!decision.ok||!decision.target_url)throw new Error(`redirect_rejected:${decision.reason}`);await assertPublicHttps(decision.target_url);const second=await oneGet(decision.target_url,maxBytes);if([301,302,307,308].includes(second.status)){validateRedirect(decision.target_url,second.location||decision.target_url,1);throw new Error("redirect_rejected:redirect_chain_rejected");}final=second;finalUrl=decision.target_url;trace.redirect_used=true;trace.redirect_target=decision.target_url;trace.final_status=second.status;
   }
-  if(!final.ok)throw new Error(`http_error:${final.status}`);let body:any;try{body=JSON.parse(final.text);}catch{throw new Error("non_json");}return {body,content_type:final.content_type,final_url:finalUrl,trace};
+  if(!final.ok)throw new Error(`http_error:${final.status}`);let body:any;try{body=JSON.parse(final.text);}catch{throw new Error("non_json");}return {body,content_type:final.content_type,final_url:finalUrl,trace,body_fingerprint:sha(final.text)};
 }
