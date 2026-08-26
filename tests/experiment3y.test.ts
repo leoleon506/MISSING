@@ -1,0 +1,20 @@
+import {describe,expect,it} from "vitest";
+import {CASES,MAX_FIND_ITEMS,assertBlindCases,compileRequest,enforceReplayDeltas,executeExpr,executeProgram,semanticValidate,validateDecision,type CompileDecision,type ProviderRef} from "../src/experiment3yCore.js";
+import {run3yControls} from "../src/experiment3yControls.js";
+import type {DocEvidence} from "../src/experiment3wCore.js";
+
+const c=CASES[0];
+const p:ProviderRef={candidate_id:"p_fixture",name:"Fixture",link:"https://fixture.example/docs"};
+const ev:DocEvidence={evidence_id:"p_fixture-e01",provider_candidate_id:p.candidate_id,requested_url:p.link,resolved_url:p.link,verified_at:new Date(0).toISOString(),status:200,content_type:"text/plain",body_fingerprint:"fixture",state:"ok",text:"Documentation GET https://fixture.example/books/{isbn}. Path parameter isbn. Response JSON fields title and publish_date. Collection records keyed by isbn with title and publish_date."};
+const decision:CompileDecision={case_id:c.case_id,provider_candidate_id:p.candidate_id,decision:"COMPILE",method:"GET",base_url:"https://fixture.example",path_template:"/books/{isbn}",path_bindings:{isbn:"$input.isbn"},query_bindings:{},outputs:{title:{op:"FIELD",path:"title"},publish_date:{op:"FIELD",path:"publish_date"}},evidence_ids:[ev.evidence_id],reason:"fixture"};
+
+describe("experiment 3Y",()=>{
+ it("freezes exactly three blind holdout families",()=>{expect(CASES).toHaveLength(3);expect(()=>assertBlindCases()).not.toThrow();expect(new Set(CASES.map(x=>x.case_id)).size).toBe(3);});
+ it("accepts a grounded generic compile and executes it",()=>{expect(()=>validateDecision(decision,c,p,[ev])).not.toThrow();expect(compileRequest(decision,c.build)).toBe("https://fixture.example/books/9780140328721");const out=executeProgram(decision.outputs!,{title:"Matilda",publish_date:"1988"},c.build);expect(out).toEqual({title:"Matilda",publish_date:"1988"});expect(semanticValidate(c,c.build,out)).toBe(true);});
+ it("rejects provider-native fields that are not evidence grounded",()=>{expect(()=>validateDecision({...decision,outputs:{...decision.outputs,publish_date:{op:"FIELD",path:"invented"}}},c,p,[ev])).toThrow(/ungrounded/);});
+ it("supports bounded keyed lookup without hard-coding the input",()=>{const body={records:{A:{title:"Alpha"},B:{title:"Beta"}}};expect(executeExpr({op:"LOOKUP",map_path:"records",key:{op:"INPUT",name:"id"},value_path:"title"},body,{id:"A"})).toBe("Alpha");expect(executeExpr({op:"LOOKUP",map_path:"records",key:{op:"INPUT",name:"id"},value_path:"title"},body,{id:"B"})).toBe("Beta");});
+ it("enforces FIND scan bound",()=>{expect(()=>executeExpr({op:"FIND",array_path:"rows",where_path:"id",equals:{op:"LITERAL",value:"A"},value_path:"title"},{rows:Array.from({length:MAX_FIND_ITEMS+1},()=>({id:"A",title:"x"}))},{})).toThrow(/bound/);});
+ it("validates postcode and IP replay semantics",()=>{const pc=CASES.find(x=>x.case_id==="uk_postcode_metadata")!,ip=CASES.find(x=>x.case_id==="ip_geolocation_metadata")!;expect(semanticValidate(pc,pc.build,{postcode:"SW1A 1AA",country:"England",latitude:51.5,longitude:-0.14})).toBe(true);expect(semanticValidate(pc,pc.build,{postcode:"WRONG",country:"England",latitude:51.5,longitude:-0.14})).toBe(false);expect(semanticValidate(ip,ip.build,{ip:"8.8.8.8",city:"Mountain View",country:"US"})).toBe(true);});
+ it("permits replay only when all discovery/compiler deltas are zero",()=>{expect(()=>enforceReplayDeltas({catalog_fetches:0,documentation_fetches:0,compiler_calls:0})).not.toThrow();expect(()=>enforceReplayDeltas({catalog_fetches:0,documentation_fetches:1,compiler_calls:0})).toThrow(/nonzero/);});
+ it("executes and rejects every active 3Y production-guard control",()=>{const r=run3yControls();expect(r.controls.length).toBeGreaterThanOrEqual(26);expect(r.controls.every(x=>x.executed&&x.rejected)).toBe(true);expect(r.controls.every(x=>typeof x.guard==="string"&&x.guard.length>0)).toBe(true);});
+});
