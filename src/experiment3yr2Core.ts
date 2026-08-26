@@ -1,6 +1,7 @@
 import {lookup} from "node:dns/promises";
 import {isIP} from "node:net";
-import {parsePublicApis,registrableDomain} from "./experiment3uCore.js";
+import {parsePublicApis} from "./experiment3tCore.js";
+import {registrableDomain} from "./experiment3uCore.js";
 import {RecoveryLedger,normalizeTokenText,parseOpenApiText,sha3yr} from "./experiment3yrCore.js";
 
 export const RECOVERY_R2_TOP_K=120;
