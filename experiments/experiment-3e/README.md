@@ -4,7 +4,7 @@
 
 Test whether MISSING can discover live MCP tools, conservatively separate read-only tools from tools that may cause external side effects, and execute only the safe subset.
 
-3E uses **no LLM**, **no credentials**, and **no paid APIs**. MCP tool annotations are treated as untrusted hints; they never override the deterministic safety policy.
+3E uses **no LLM**, **no credentials**, and **no paid APIs**. MCP tool annotations are treated as untrusted hints; they never override the deterministic safety policy. An affirmative read-only annotation is necessary but not sufficient for execution.
 
 ## Frozen discovery source
 
@@ -20,7 +20,7 @@ A tool is executable only when **all** are true:
 
 1. `inputSchema` is an object.
 2. `inputSchema.required` is absent or an empty array. No required argument is ever synthesized.
-3. If `annotations.readOnlyHint === false`, reject.
+3. `annotations.readOnlyHint === true` is required.
 4. If `annotations.destructiveHint === true`, reject.
 5. Tool name plus description contains at least one explicit read signal:
    - `get`, `list`, `read`, `search`, `find`, `lookup`, `fetch`, `inspect`, `describe`, `status`, `health`, `info`, `view`, `show`, `discover`.
