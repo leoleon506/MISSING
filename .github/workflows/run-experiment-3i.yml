@@ -1,0 +1,25 @@
+name: Run MISSING Experiment 3I
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  experiment-3i:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run benchmark:3i
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: missing-experiment-3i-results
+          path: results/experiment-3i/*.json
+          if-no-files-found: error
+          retention-days: 30
