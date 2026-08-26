@@ -23,9 +23,9 @@ A tool is executable only when **all** are true:
 3. `annotations.readOnlyHint === true` is required.
 4. If `annotations.destructiveHint === true`, reject.
 5. Tool name plus description contains at least one explicit read signal:
-   - `get`, `list`, `read`, `search`, `find`, `lookup`, `fetch`, `inspect`, `describe`, `status`, `health`, `info`, `view`, `show`, `discover`.
+   - `get`, `list`, `read`, `search`, `find`, `lookup`, `fetch`, `inspect`, `describe`, `status`, `health`, `info`, `view`, `show`, `discover`, `ping`.
 6. Tool name plus description contains **none** of these side-effect/transaction signals:
-   - `create`, `update`, `delete`, `remove`, `send`, `publish`, `post`, `put`, `patch`, `upload`, `write`, `insert`, `checkout`, `purchase`, `buy`, `order`, `pay`, `transfer`, `submit`, `commit`, `merge`, `close`, `cancel`, `invite`, `message`, `email`, `reply`, `vote`, `like`, `follow`, `subscribe`, `unsubscribe`, `deploy`, `restart`, `stop`, `start`, `set`, `change`, `edit`, `add`, `execute`, `run`.
+   - `create`, `update`, `delete`, `remove`, `send`, `publish`, `post`, `put`, `patch`, `upload`, `write`, `insert`, `checkout`, `purchase`, `buy`, `order`, `pay`, `transfer`, `submit`, `commit`, `merge`, `close`, `cancel`, `invite`, `message`, `email`, `reply`, `vote`, `like`, `follow`, `subscribe`, `unsubscribe`, `deploy`, `restart`, `stop`, `start`, `set`, `change`, `edit`, `add`, `execute`, `run`, `save`, `generate`, `trigger`, `login`, `logout`, `authorize`, `authenticate`, `mint`.
 7. The call arguments are exactly `{}`.
 
 Any ambiguity means **REJECT / DO NOT EXECUTE**.
