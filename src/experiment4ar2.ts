@@ -13,4 +13,5 @@ replace('"GO_4A_R_BREADTH_RECOVERY":"REASSESS_4A_R_BREADTH_RECOVERY"','"GO_4A_R2
 replace('experiment:"4A-R",purpose:"development_breadth_recovery"','experiment:"4A-R2",purpose:"development_typed_ir_recovery"');
 replace('base_sha:"9038f5591be396a44f1971520288ddec64098141"','base_sha:"d8b7b0f2b0d4269d6bd39a7509089e75fe41c596"');
 await writeFile(generatedUrl,s);
-await import("./.generated-experiment4ar2.js");
+const generatedImport="./.generated-experiment4ar2.js";
+await import(generatedImport);
