@@ -1,0 +1,24 @@
+name: Run MISSING Experiment 3Y-R2F
+
+on:
+  workflow_dispatch:
+
+jobs:
+  experiment-3yr2f:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run benchmark:3yr2f
+      - uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-3yr2f-results
+          path: results/experiment-3yr2f/*.json
+          if-no-files-found: error
+          retention-days: 30
