@@ -1,0 +1,19 @@
+import type {Config} from "./config/index.js";
+import {FOUR_A_CASES} from "./experiment4aCore.js";
+import type {Provider4A} from "./experiment4aContract.js";
+import {selectEvidenceWindows} from "./experiment4arCore.js";
+import {BOUNDARY_SCHEMA,canonicalizeBoundary} from "./experiment4ar2Core.js";
+import type {DocEvidence} from "./experiment3wCore.js";
+
+const BY_ID=Object.fromEntries(FOUR_A_CASES.map(x=>[x.case_id,x]));
+export async function synthesize4ar2(config:Config,p:Provider4A,evidence:DocEvidence[],phase:"initial"|"repair",previousError?:string){
+ const ec=BY_ID[p.case_id];
+ const system=["You are MISSING's evidence-grounded typed API compiler.","Use ONLY supplied evidence.","If evidence cannot support an anonymous HTTPS GET satisfying every required output, return REJECT.","Never invent provider, host, path, parameter, field, credential, header, transformation, or endpoint.","For COMPILE, projection rows must use only FIELD, INPUT, LOOKUP, or FIND.","FIELD uses path; INPUT uses name; LOOKUP uses map_path plus key_op/key_name or key_value plus value_path; FIND uses array_path, where_path, equals_op/equals_name or equals_value plus value_path.","Paths use dotted notation with numeric indices. No JSONPath, brackets, or wildcard.","method must be GET and base_url must be an HTTPS origin literally present in cited evidence."].join(" ");
+ const payload={case:{case_id:p.case_id,input_names:Object.keys(ec.build),required_outputs:ec.required,build_input:ec.build,replay_input:ec.replay},provider:{candidate_id:p.candidate_id,name:p.name},phase,previous_validation_error:previousError??null,evidence:selectEvidenceWindows(evidence,ec.required)};
+ const t0=Date.now();
+ const r=await fetch(`${config.baseUrl.replace(/\/$/,"")}/chat/completions`,{method:"POST",headers:{authorization:`Bearer ${config.apiKey}`,"content-type":"application/json"},body:JSON.stringify({model:config.model,messages:[{role:"system",content:system},{role:"user",content:JSON.stringify(payload)}],response_format:{type:"json_schema",json_schema:BOUNDARY_SCHEMA}})});
+ const latency_ms=Date.now()-t0,text=await r.text();let body:any=null;try{body=JSON.parse(text);}catch{}
+ const msg=body?.choices?.[0]?.message,raw=msg?.content??null;let parsed:any=null,parse_error:string|null=null;
+ if(typeof raw==="string"){try{const structured=JSON.parse(raw);parsed=canonicalizeBoundary(structured,ec.required);}catch(e){parse_error=String(e);}}
+ return {phase,http_status:r.status,http_ok:r.ok,refusal:msg?.refusal??null,raw_content:raw,parsed_json:parsed,parse_error,usage:body?.usage??null,latency_ms};
+}
