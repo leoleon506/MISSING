@@ -1,0 +1,36 @@
+name: Run MISSING Experiment 3Y
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/3y-blind-end-to-end-capability-manufacture
+    paths:
+      - .github/workflows/run-experiment-3y.yml
+
+permissions:
+  contents: read
+
+jobs:
+  experiment-3y:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-5.6-luna
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run benchmark:3y
+      - uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-3y-results
+          path: results/experiment-3y/*.json
+          if-no-files-found: error
+          retention-days: 30
