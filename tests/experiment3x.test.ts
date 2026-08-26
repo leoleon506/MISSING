@@ -1,0 +1,18 @@
+import {describe,expect,it} from "vitest";
+import {CASES,MAX_FIND_ITEMS,compileFrozenRequest,enforceReplayDeltas,executeExpr,executeProgram,featureSatisfied,provenanceFingerprint,validateCurrencyOutput,validateDecision,validateRequestTemplate,type CompileDecision} from "../src/experiment3xCore.js";
+import {run3xControls} from "../src/experiment3xControls.js";
+
+const nbp=CASES.find(c=>c.case_id==="currency_metadata_nbp")!;
+const cf=CASES.find(c=>c.case_id==="currency_metadata_currencyfreaks")!;
+const nbpDecision:CompileDecision={case_id:nbp.case_id,provider_candidate_id:nbp.provider_candidate_id,decision:"COMPILE",outputs:{code:{op:"FIELD",path:"code"},name:{op:"FIELD",path:"currency"}},evidence_ids:nbp.evidence.map(e=>e.evidence_id),reason:"grounded semantic alias"};
+const cfDecision:CompileDecision={case_id:cf.case_id,provider_candidate_id:cf.provider_candidate_id,decision:"COMPILE",outputs:{code:{op:"LOOKUP",map_path:"supportedCurrenciesMap",key:{op:"INPUT",name:"currency_id"},value_path:"currencyCode"},name:{op:"LOOKUP",map_path:"supportedCurrenciesMap",key:{op:"INPUT",name:"currency_id"},value_path:"currencyName"}},evidence_ids:cf.evidence.map(e=>e.evidence_id),reason:"grounded keyed lookup"};
+
+describe("experiment 3X",()=>{
+ it("freezes exactly two positive and two negative cases",()=>{expect(CASES).toHaveLength(4);expect(CASES.filter(c=>c.kind==="positive")).toHaveLength(2);expect(CASES.filter(c=>c.kind==="negative")).toHaveLength(2);expect(provenanceFingerprint()).toHaveLength(64);});
+ it("accepts the NBP semantic alias",()=>{expect(()=>validateDecision(nbpDecision,nbp)).not.toThrow();expect(featureSatisfied(nbp,nbpDecision)).toBe(true);const out=executeProgram(nbpDecision.outputs!,{code:"USD",currency:"US Dollar"},{currency_id:"USD"});expect(out).toEqual({code:"USD",name:"US Dollar"});expect(validateCurrencyOutput({currency_id:"USD"},out)).toBe(true);});
+ it("accepts CurrencyFreaks runtime map lookup and changes with input",()=>{expect(()=>validateDecision(cfDecision,cf)).not.toThrow();expect(featureSatisfied(cf,cfDecision)).toBe(true);const body={supportedCurrenciesMap:{USD:{currencyCode:"USD",currencyName:"US Dollar"},EUR:{currencyCode:"EUR",currencyName:"Euro"}}};expect(executeProgram(cfDecision.outputs!,body,{currency_id:"USD"})).toEqual({code:"USD",name:"US Dollar"});expect(executeProgram(cfDecision.outputs!,body,{currency_id:"EUR"})).toEqual({code:"EUR",name:"Euro"});});
+ it("rejects ungrounded provider fields and endpoint mutation",()=>{expect(()=>validateDecision({...nbpDecision,outputs:{...nbpDecision.outputs,name:{op:"FIELD",path:"madeup"}}},nbp)).toThrow(/ungrounded/);expect(()=>validateRequestTemplate(nbp,{...nbp.request!,path_template:"/evil"})).toThrow(/mutated/);});
+ it("enforces FIND bound",()=>{expect(()=>executeExpr({op:"FIND",array_path:"rows",where_path:"code",equals:{op:"LITERAL",value:"USD"},value_path:"name"},{rows:Array.from({length:MAX_FIND_ITEMS+1},()=>({code:"USD",name:"x"}))},{})).toThrow(/bound/);});
+ it("compiles only the frozen NBP path and replay budget is zero-only",()=>{expect(compileFrozenRequest(nbp,{currency_id:"USD"})).toBe("https://api.nbp.pl/api/exchangerates/rates/a/USD/");expect(()=>enforceReplayDeltas({documentation_fetches:0,compiler_calls:0})).not.toThrow();expect(()=>enforceReplayDeltas({documentation_fetches:1,compiler_calls:0})).toThrow();});
+ it("executes and verifies all 24 active controls",()=>{const x=run3xControls();expect(x.controls).toHaveLength(24);expect(x.controls.every(c=>c.executed&&c.rejected)).toBe(true);expect(x.controls.every(c=>typeof c.guard==="string"&&c.guard.length>0)).toBe(true);});
+});
