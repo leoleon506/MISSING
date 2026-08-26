@@ -3,6 +3,9 @@
 ## Status
 Preregistered before benchmark execution.
 
+## Pre-run amendment
+Before implementation and before any benchmark execution, endpoint verification showed that `https://earthquake.usgs.gov/fdsnws/event/1/swagger.json` is not an official OpenAPI/Swagger document. USGS exposes WADL for that service. To keep 3P strictly OpenAPI-based and avoid knowingly freezing an invalid candidate contract, the earthquake candidate/case is replaced pre-run by GitHub's official REST OpenAPI description and a public-repository metadata case. No GO threshold is relaxed by this amendment.
+
 ## Question
 Can MISSING detect a missing capability, inspect multiple live machine-readable provider contracts with no case-to-provider mapping, procure a viable source/operation, compile it into a bounded executable recipe, validate the live result, persist the recipe, and replay it on a different input with zero planner calls?
 
@@ -13,7 +16,7 @@ Can MISSING detect a missing capability, inspect multiple live machine-readable 
 The index contains specification locations only. It does not contain case mappings, execution endpoints, parameter bindings, or output JSON paths.
 
 1. `nws` — `https://api.weather.gov/openapi.json`
-2. `usgs_earthquake` — `https://earthquake.usgs.gov/fdsnws/event/1/swagger.json`
+2. `github` — `https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2022-11-28.json`
 3. `usgs_water` — `https://api.waterdata.usgs.gov/ogcapi/v0/openapi`
 
 All three specifications are fetched live during the build phase and fingerprinted.
@@ -29,14 +32,14 @@ Replay input: `point = 40.7128,-74.0060`
 
 Required output leaf names: `gridId`, `gridX`, `gridY`.
 
-### Case B — Latest earthquake above a magnitude threshold
-Intent: Return the latest earthquake meeting a minimum magnitude, including id, magnitude, place, and event time.
+### Case B — GitHub public repository metadata
+Intent: Given a public GitHub repository owner and repository name, return full repository name, star count, and primary language.
 
-Build input: `minmagnitude = 4.5`
+Build input: `owner = openai`, `repo = openai-python`
 
-Replay input: `minmagnitude = 5.5`
+Replay input: `owner = nodejs`, `repo = node`
 
-Required output leaf names: `id`, `mag`, `place`, `time`.
+Required output leaf names: `full_name`, `stargazers_count`, `language`.
 
 ### Case C — USGS monitoring-location metadata
 Intent: Return metadata for a USGS monitoring-location identifier.
@@ -52,12 +55,13 @@ Required output leaf names: `id`, `monitoring_location_name`, `state_name`.
 - Every case sees the same candidate specification index.
 - The source index may provide only provider id and spec URL.
 - No case may contain a required provider/source, endpoint, parameter mapping, execution URL, or output JSON path.
-- Only live fetched OpenAPI/Swagger contracts may contribute operations and parameter definitions.
+- Only live fetched OpenAPI contracts may contribute operations and parameter definitions.
 - Only `GET` operations are eligible.
 - Deterministic lexical retrieval may reduce each live contract to a bounded set of candidate operations before the planner sees it.
 - Planner output is a flat typed Procurement Spec. It chooses provider id, live operation path, method, and up to six parameter bindings/fixed values.
 - Every chosen operation and parameter must exist in the fetched live contract.
 - Request compilation is deterministic; the LLM never emits URLs or code.
+- The execution hostname must be declared by the selected live contract (`servers`) or be the contract's canonical API hostname derived deterministically from that specification when no `servers` entry is present.
 - After a successful JSON probe, output projection is induced deterministically by matching the required leaf names against the live response tree. The planner does not receive or invent output JSON paths.
 - Recipes persist provider, spec fingerprint, operation, bindings, induced projections, and recipe fingerprint.
 - Replay uses the persisted recipe on a different input. It makes zero planner calls and does not re-procure a source.
@@ -68,7 +72,7 @@ Required output leaf names: `id`, `monitoring_location_name`, `state_name`.
 - IP literals rejected.
 - DNS must resolve only to public addresses.
 - No redirects are followed.
-- Execution host must exactly match the host of the selected provider specification URL.
+- Execution host must be allowed by the selected live provider contract as defined above.
 - No credentials, cookies, API keys, authorization headers, or arbitrary headers are supplied.
 - GET only; no POST/PUT/PATCH/DELETE.
 - JSON response required.
@@ -78,7 +82,7 @@ Required output leaf names: `id`, `monitoring_location_name`, `state_name`.
 ## Deterministic semantic validators
 
 - NWS: `gridId` is a non-empty string and `gridX`/`gridY` are finite numbers.
-- Earthquake: `id` and `place` are non-empty strings, `mag >= input.minmagnitude`, and `time` is finite.
+- GitHub: `full_name` must equal `owner/repo` case-insensitively, `stargazers_count` is finite and non-negative, and `language` is either a non-empty string or null.
 - USGS Water: `id` must equal the requested `site_id`; `monitoring_location_name` and `state_name` are non-empty strings.
 
 ## Frozen negative controls
@@ -86,7 +90,7 @@ Required output leaf names: `id`, `monitoring_location_name`, `state_name`.
 1. An operation path not present in the selected live contract must be rejected before execution.
 2. A parameter not declared by the selected live operation/path must be rejected before execution.
 3. A non-GET method must be rejected before execution.
-4. An execution URL whose hostname differs from the provider spec hostname must be rejected.
+4. An execution URL whose hostname is not allowed by the selected live provider contract must be rejected.
 5. A recipe with an empty or missing spec fingerprint must not count as fingerprint evidence.
 
 ## GO gates
