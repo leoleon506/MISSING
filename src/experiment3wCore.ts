@@ -1,0 +1,47 @@
+import {createHash} from "node:crypto";
+import {isIP} from "node:net";
+import {EXEC_CASES,type ExecutionCase} from "./experiment3rCore.js";
+
+export const MAX_DEPTH=2,MAX_DOC_PAGES=8,MAX_BYTES=4*1024*1024,TIMEOUT_MS=12000;
+export const sha=(x:any)=>createHash("sha256").update(typeof x==="string"?x:JSON.stringify(x)).digest("hex");
+
+export type FrozenProvider={case_id:string,candidate_id:string,name:string,start_url:string};
+export const FROZEN_PROVIDERS:FrozenProvider[]=[
+ {case_id:"public_source_code_repository_metadata",candidate_id:"p004_5746ab3901",name:"Code.gov",start_url:"https://code.gov"},
+ {case_id:"fantasy_role_playing_ability_score_metadata",candidate_id:"p014_6fec1446bc",name:"Dungeons and Dragons (Alternate)",start_url:"https://open5e.com/"},
+ {case_id:"currency_metadata",candidate_id:"p019_611fbbfa8b",name:"Frankfurter",start_url:"https://www.frankfurter.app/docs"},
+ {case_id:"currency_metadata",candidate_id:"p010_236230d4c5",name:"Currency-api",start_url:"https://github.com/fawazahmed0/currency-api#readme"},
+ {case_id:"currency_metadata",candidate_id:"p006_773cdab283",name:"Amdoren",start_url:"https://www.amdoren.com/currency-api/"},
+ {case_id:"currency_metadata",candidate_id:"p003_27f6223956",name:"CurrencyScoop",start_url:"https://currencyscoop.com/api-documentation"},
+ {case_id:"currency_metadata",candidate_id:"p016_1dae4bc72f",name:"Exchangerate.host",start_url:"https://exchangerate.host?utm_source=Github&utm_medium=Referral&utm_campaign=Public-apis-repo-Best-sellers"},
+ {case_id:"currency_metadata",candidate_id:"p022_0fdec33072",name:"National Bank of Poland",start_url:"http://api.nbp.pl/en.html"},
+ {case_id:"currency_metadata",candidate_id:"p011_1434d08808",name:"CurrencyBeacon",start_url:"https://currencybeacon.com/"},
+ {case_id:"currency_metadata",candidate_id:"p012_e3c788ce5b",name:"CurrencyFreaks",start_url:"https://currencyfreaks.com/"}
+];
+
+export type DocEvidence={evidence_id:string,provider_candidate_id:string,requested_url:string,resolved_url:string,verified_at:string,status:number,content_type:string,body_fingerprint:string,text:string,state:"ok"|"rejected"|"error",error?:string};
+export type MicroContract={case_id:string,provider_candidate_id:string,decision:"COMPILE"|"REJECT",method?:string,base_url?:string,path_template?:string,path_bindings?:Record<string,string>,query_bindings?:Record<string,string>,output_paths?:Record<string,string>,evidence_ids?:string[],reason?:string};
+export type SafetyEvent={kind:string,accepted:boolean,detail?:any};
+
+function esc(s:string){return s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");}
+export function registrable(host:string){const h=host.toLowerCase().replace(/\.$/,"");const p=h.split(".");return p.length<=2?h:p.slice(-2).join(".");}
+export function docScopeAllowed(start:string,target:string){try{const a=new URL(start),b=new URL(target);if(!["http:","https:"].includes(b.protocol)||isIP(b.hostname))return false;if(a.hostname==="github.com"&&b.hostname==="raw.githubusercontent.com"){const ap=a.pathname.split("/").filter(Boolean),bp=b.pathname.split("/").filter(Boolean);return ap.length>=2&&bp.length>=2&&ap[0]===bp[0]&&ap[1]===bp[1];}return registrable(a.hostname)===registrable(b.hostname);}catch{return false;}}
+export function extractDocLinks(base:string,start:string,text:string,depth:number){const out:string[]=[];const re=/(?:href|src)\s*=\s*["']([^"'#]+)["']/gi;let m;while((m=re.exec(text))){try{const u=new URL(m[1],base).toString();if(docScopeAllowed(start,u)&&/docs?|api|reference|developer|readme|guide|endpoint|currency|ability|repo/i.test(u))out.push(u);}catch{}}return [...new Set(out)].slice(0,40).map(url=>({url,depth}));}
+
+function evidenceText(ids:string[],all:DocEvidence[],providerId:string){const by=new Map(all.map(e=>[e.evidence_id,e]));const picked:DocEvidence[]=[];for(const id of ids){const e=by.get(id);if(!e)throw new Error(`unknown_evidence_id:${id}`);if(e.provider_candidate_id!==providerId)throw new Error(`cross_provider_evidence:${id}`);if(e.state!=="ok")throw new Error(`non_ok_evidence:${id}`);picked.push(e);}return picked.map(e=>e.text).join("\n");}
+function literalPathGrounded(path:string,text:string){if(text.includes(path))return true;const parts=path.split(/\{[^}]+\}/g).filter(Boolean);return parts.length>0&&parts.every(p=>text.includes(p));}
+function sourceKey(v:string){return v.startsWith("$input.")?v.slice(7):null;}
+export function validateMicroContract(c:any,provider:FrozenProvider,evidence:DocEvidence[],safety:SafetyEvent[]=[]){const errors:string[]=[];const ec=EXEC_CASES[provider.case_id];if(!c||typeof c!=="object"||Array.isArray(c))return {errors:["contract_not_object"]};if(c.case_id!==provider.case_id)errors.push("case_id_mismatch");if(c.provider_candidate_id!==provider.candidate_id)errors.push("provider_id_mismatch");if(!["COMPILE","REJECT"].includes(c.decision))errors.push("decision_invalid");if(c.decision!=="COMPILE")return {errors,contract:c as MicroContract};if(c.method!=="GET"){errors.push("method_not_get");safety.push({kind:"non_get",accepted:false,detail:c.method});}
+ const ids=Array.isArray(c.evidence_ids)?c.evidence_ids:[];if(!ids.length)errors.push("empty_evidence_ids");let text="";try{text=evidenceText(ids,evidence,provider.candidate_id);}catch(e){errors.push(String(e).replace(/^Error:\s*/,""));}
+ let base:URL|null=null;try{base=new URL(String(c.base_url||""));if(base.protocol!=="https:"){errors.push("execution_base_non_https");safety.push({kind:"http_execution",accepted:false});}if(isIP(base.hostname)){errors.push("execution_base_ip_literal");safety.push({kind:"private_ip",accepted:false});}if(text&&!text.includes(base.origin)){errors.push("undocumented_base_url");safety.push({kind:"undocumented_host",accepted:false,detail:base.origin});}}catch{errors.push("execution_base_invalid");}
+ const path=String(c.path_template||"");if(!path.startsWith("/"))errors.push("path_not_absolute");if(text&&!literalPathGrounded(path,text)){errors.push("undocumented_path");safety.push({kind:"undocumented_path",accepted:false,detail:path});}
+ const pb=c.path_bindings&&typeof c.path_bindings==="object"&&!Array.isArray(c.path_bindings)?c.path_bindings:{};const qb=c.query_bindings&&typeof c.query_bindings==="object"&&!Array.isArray(c.query_bindings)?c.query_bindings:{};const op=c.output_paths&&typeof c.output_paths==="object"&&!Array.isArray(c.output_paths)?c.output_paths:{};
+ for(const [name,src] of Object.entries(pb)){if(!path.includes(`{${name}}`))errors.push(`path_placeholder_missing:${name}`);if(text&&!text.includes(name)){errors.push(`invented_path_parameter:${name}`);safety.push({kind:"invented_parameter",accepted:false,detail:name});}const k=sourceKey(String(src));if(!k||!(k in ec.build))errors.push(`invalid_input_source:${name}`);}
+ for(const [name,src] of Object.entries(qb)){if(text&&!text.includes(name)){errors.push(`invented_query_parameter:${name}`);safety.push({kind:"invented_parameter",accepted:false,detail:name});}const s=String(src);if(s.startsWith("$input.")){const k=sourceKey(s);if(!k||!(k in ec.build))errors.push(`invalid_input_source:${name}`);}}
+ for(const req of ec.required){const p=op[req];if(typeof p!=="string"||!p)errors.push(`missing_output_path:${req}`);else{const leaf=p.split(".").filter(Boolean).pop()||p;if(text&&!text.toLowerCase().includes(leaf.toLowerCase())){errors.push(`invented_output_field:${req}:${leaf}`);safety.push({kind:"invented_output_field",accepted:false,detail:leaf});}}}
+ for(const ph of path.match(/\{([^}]+)\}/g)||[]){const n=ph.slice(1,-1);if(!(n in pb))errors.push(`unbound_path_placeholder:${n}`);}return {errors,contract:c as MicroContract};}
+
+export function compileMicroRequest(c:MicroContract,input:Record<string,unknown>){if(c.decision!=="COMPILE")throw new Error("contract_not_compile");let path=String(c.path_template);for(const [name,src] of Object.entries(c.path_bindings||{})){const k=sourceKey(src);if(!k||!(k in input))throw new Error(`missing_input:${src}`);path=path.replaceAll(`{${name}}`,encodeURIComponent(String(input[k])));}if(/\{[^}]+\}/.test(path))throw new Error("unresolved_path_placeholder");const u=new URL(path,String(c.base_url));for(const [name,src] of Object.entries(c.query_bindings||{})){if(src.startsWith("$input.")){const k=sourceKey(src);if(!k||!(k in input))throw new Error(`missing_input:${src}`);u.searchParams.set(name,String(input[k]));}else u.searchParams.set(name,src);}return u.toString();}
+function getPath(v:any,path:string){return path.split(".").filter(Boolean).reduce((x,k)=>Array.isArray(x)&&/^\d+$/.test(k)?x[Number(k)]:x?.[k],v);}
+export function projectMicro(body:any,c:MicroContract,ec:ExecutionCase){const out:Record<string,any>={};for(const req of ec.required)out[req]=getPath(body,String(c.output_paths?.[req]||""));return out;}
+export function recipeFingerprint(x:any){return sha(x);}
