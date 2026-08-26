@@ -1,0 +1,24 @@
+name: Run MISSING Experiment 3Y-I-R
+
+on:
+  workflow_dispatch:
+
+jobs:
+  experiment-3yir:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run benchmark:3yir
+      - uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-3yir-results
+          path: results/experiment-3yir/*.json
+          if-no-files-found: error
+          retention-days: 30
