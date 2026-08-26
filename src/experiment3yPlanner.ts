@@ -11,9 +11,11 @@ export async function compileCapability(config:Config,c:HoldoutCase,p:ProviderRe
  "For REJECT use exactly: case_id, provider_candidate_id, decision, reason.",
  "For COMPILE use exactly: case_id, provider_candidate_id, decision, method, base_url, path_template, path_bindings, query_bindings, outputs, evidence_ids, reason.",
  "method must be GET. base_url must be an HTTPS origin literally present in cited evidence. path_template must be literally documented except placeholders.",
- "Bindings may reference only $input.<name> or documented literal strings.",
+ "path_bindings and query_bindings MUST be flat JSON objects whose VALUES ARE STRINGS, never nested objects. Example: {\"isbn\":\"$input.isbn\"} or {\"format\":\"json\"}.",
+ "A binding may reference only $input.<name> or a documented literal string. Never emit {source:...}, {value:...}, or any wrapper object for a binding.",
  "outputs maps every canonical output to exactly one bounded DSL expression.",
- "Allowed DSL: FIELD(path), represented as {op:'FIELD',path}; INPUT(name); LOOKUP(map_path,key,value_path) where key is INPUT or grounded LITERAL; FIND(array_path,where_path,equals,value_path) where equals is INPUT or grounded LITERAL.",
+ "Allowed DSL JSON forms are exactly: {\"op\":\"FIELD\",\"path\":\"field.path\"}; {\"op\":\"INPUT\",\"name\":\"input_name\"}; {\"op\":\"LOOKUP\",\"map_path\":\"map.path\",\"key\":{\"op\":\"INPUT\",\"name\":\"input_name\"},\"value_path\":\"field\"}; {\"op\":\"FIND\",\"array_path\":\"rows\",\"where_path\":\"id\",\"equals\":{\"op\":\"INPUT\",\"name\":\"input_name\"},\"value_path\":\"field\"}.",
+ "For endpoint placeholders whose documented name differs from the canonical input name, bind the documented placeholder to the canonical input, e.g. {\"address\":\"$input.ip\"}.",
  "Never emit headers, Authorization, credentials, cookies, arbitrary functions, JavaScript, regex execution, shell, code, browser instructions, filesystem operations, loops, joins, arithmetic transforms, or network instructions.",
  "Provider-native path/field tokens in projections must be visibly grounded in cited documentation evidence. Cite only supplied evidence_ids."
  ].join(" ");
