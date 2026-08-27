@@ -1,3 +1,4 @@
+import {readFile} from "node:fs/promises";
 import {describe,it,expect} from "vitest";
 import {summarizeJsonShape,normalizeDocumentedRelativeEndpoint,canonicalizeRepairProjection,RESPONSE_REPAIR_SCHEMA} from "../src/experiment4ar4Core.js";
 
@@ -8,4 +9,5 @@ describe("4A-R4 response-grounded recovery",()=>{
  it("does not allow traversal in relative endpoint canonicalization",()=>expect(normalizeDocumentedRelativeEndpoint("https://example.test/api/v1","../admin","https://example.test/api/v1 ../admin")).toBeNull());
  it("canonicalizes a response repair projection through the existing typed DSL",()=>{const rows=[{output:"version",op:"FIELD",path:"dist-tags.latest",name:null,map_path:null,key_op:null,key_name:null,key_value:null,value_path:null,array_path:null,where_path:null,equals_op:null,equals_name:null,equals_value:null}];expect(canonicalizeRepairProjection(rows,["version"],["package_name"])).toEqual({version:{op:"FIELD",path:"dist-tags.latest"}});});
  it("keeps response repair schema strict",()=>expect(RESPONSE_REPAIR_SCHEMA.strict).toBe(true));
+ it("keeps the frozen R runner derivation anchors intact",async()=>{const source=await readFile(new URL("../src/experiment4ar.ts",import.meta.url),"utf8");const verify='try{const contract=syn.contract as MicroContract,url=compile4ar(contract,c.build),first=await safeJson(url,ledger),out1=project4ar(syn.projection,first.body,c.build);if(!validateProjected4ar(c.case_id,c.build,out1))throw new Error("semantic_validation_first_failed");const second=await safeJson(url,ledger),out2=project4ar(syn.projection,second.body,c.build);if(!validateProjected4ar(c.case_id,c.build,out2))throw new Error("semantic_validation_confirmation_failed");if(!sameRequired(out1,out2,c.required))throw new Error("confirmation_value_mismatch");';expect(source).toContain(verify);expect(source).toContain('const before={catalogFetches,rerankerCalls,docFetches,synthesisCalls},replay:any[]=[];for(const recipe of recipes)');expect(source).toContain('"GO_4A_R_BREADTH_RECOVERY":"REASSESS_4A_R_BREADTH_RECOVERY"');});
 });
