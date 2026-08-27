@@ -31,6 +31,12 @@ describe("4A-P1 active schema induction",()=>{
     expect(url).toContain("s=Margarita");
   });
 
+  it("does not bind a single task input to an unrelated descriptive slot merely because it is the only slot",()=>{
+    const spec={openapi:"3.0.0",servers:[{url:"https://api.example.test"}],paths:{"/vehicles":{get:{parameters:[{name:"make",in:"query",required:true}],responses:{"200":{description:"ok"}}}}}};
+    const result=buildRequestHypothesesP1([specEvidence(spec,"vin_vehicle_metadata")],"vin_vehicle_metadata");
+    expect(result.hypotheses).toHaveLength(0);
+  });
+
   it("rejects a request operation with a required authentication-like parameter before probing",()=>{
     const spec={openapi:"3.0.0",servers:[{url:"https://api.example.test"}],paths:{"/estimate":{get:{parameters:[{name:"key",in:"query",required:true},{name:"name",in:"query",required:true}],responses:{"200":{description:"ok"}}}}}};
     const result=buildRequestHypothesesP1([specEvidence(spec,"age_estimate_by_name")],"age_estimate_by_name");
