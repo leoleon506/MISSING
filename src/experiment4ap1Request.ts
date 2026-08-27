@@ -5,6 +5,7 @@ import type {R6ROperation} from "./experiment4ar6rModel.js";
 import {FOUR_AP1_MAX_PROBES_PER_PROVIDER,fourAp1Sha,type P1RequestHypothesis,type P1RequestSlot} from "./experiment4ap1Model.js";
 
 const AUTH_LIKE=/^(?:api[_-]?key|apikey|key|token|access[_-]?token|secret|authorization|auth|app[_-]?id|appid|client[_-]?id|client[_-]?secret)$/i;
+const GENERIC_SINGLE_SLOT=/^(?:id|name|q|s|query|search|term|value|input)$/i;
 
 export function lexicalTokensP1(value:string){
   return [...new Set(String(value)
@@ -59,12 +60,13 @@ function concretePathRelation(operation:R6ROperation,evidence:DocEvidence[],inpu
 }
 
 function enumerateAssignments(inputNames:string[],slots:P1RequestSlot[],build:Record<string,any>){
+  const nonAuthSlots=slots.filter(slot=>!slot.auth_like);
   const rows=inputNames.map(input=>{
-    const candidates=slots.filter(slot=>!slot.auth_like).map(slot=>{
+    const candidates=nonAuthSlots.map(slot=>{
       const lexical=overlap(input,slot.name);
       const example=slot.literals.some(literal=>buildMatchesLiteral(build[input],literal.value));
       let score=lexical*120+(example?180:0);
-      if(!score&&inputNames.length===1&&slots.filter(x=>!x.auth_like).length===1)score=35;
+      if(!score&&inputNames.length===1&&nonAuthSlots.length===1&&GENERIC_SINGLE_SLOT.test(slot.name))score=35;
       return {slot,score};
     }).filter(row=>row.score>0).sort((a,b)=>b.score-a.score||Number(b.slot.in==="path")-Number(a.slot.in==="path")||a.slot.name.localeCompare(b.slot.name)).slice(0,4);
     return {input,candidates};
