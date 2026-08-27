@@ -1,0 +1,234 @@
+import type {Config} from "./config/index.js";
+import type {Provider4A} from "./experiment4aContract.js";
+import type {DocEvidence} from "./experiment3wCore.js";
+import {FOUR_A_CASES} from "./experiment4aCore.js";
+import {
+  extractDocumentedOperationsR6,
+  materializeSelectionR6,
+  operationPacketFingerprintR6,
+  type R6Selection
+} from "./experiment4ar6Core.js";
+
+const BY_ID=Object.fromEntries(FOUR_A_CASES.map(x=>[x.case_id,x]));
+
+function selectionSchema(inputs:string[],requiredOutputs:string[],ops:any[]) {
+  const maxPath=Math.max(0,...ops.map(x=>x.path_parameters.length-1));
+  const maxQuery=Math.max(0,...ops.map(x=>x.query_parameters.length-1));
+  const maxResponse=Math.max(0,...ops.map(x=>x.response_paths.length-1));
+  const maxLiteral=Math.max(0,...ops.flatMap(x=>x.query_parameters).map((x:any)=>x.literals.length-1));
+
+  const pathBinding={
+    type:"object",
+    additionalProperties:false,
+    properties:{
+      parameter_index:{type:"integer",minimum:0,maximum:maxPath},
+      input_name:{type:"string",enum:inputs}
+    },
+    required:["parameter_index","input_name"]
+  };
+
+  const queryBinding={
+    type:"object",
+    additionalProperties:false,
+    properties:{
+      parameter_index:{type:"integer",minimum:0,maximum:maxQuery},
+      source_kind:{type:"string",enum:["INPUT","LITERAL","OMIT"]},
+      input_name:{type:"string",enum:["NONE",...inputs]},
+      literal_index:{type:"integer",minimum:-1,maximum:maxLiteral}
+    },
+    required:["parameter_index","source_kind","input_name","literal_index"]
+  };
+
+  const outputMapping={
+    type:"object",
+    additionalProperties:false,
+    properties:{
+      output_name:{type:"string",enum:requiredOutputs},
+      source_kind:{type:"string",enum:["FIELD","INPUT"]},
+      response_path_index:{type:"integer",minimum:-1,maximum:maxResponse},
+      input_name:{type:"string",enum:["NONE",...inputs]}
+    },
+    required:["output_name","source_kind","response_path_index","input_name"]
+  };
+
+  return {
+    name:"missing_4ar6_operation_selection",
+    strict:true,
+    schema:{
+      type:"object",
+      additionalProperties:false,
+      properties:{
+        decision:{type:"string",enum:["COMPILE","REJECT"]},
+        operation_index:{type:"integer",minimum:0,maximum:Math.max(0,ops.length-1)},
+        path_bindings:{type:"array",maxItems:16,items:pathBinding},
+        query_bindings:{type:"array",maxItems:24,items:queryBinding},
+        output_mappings:{type:"array",minItems:requiredOutputs.length,maxItems:requiredOutputs.length,items:outputMapping},
+        reason:{type:"string"}
+      },
+      required:["decision","operation_index","path_bindings","query_bindings","output_mappings","reason"]
+    }
+  };
+}
+
+function normalizeSelection(x:any):R6Selection {
+  return {
+    decision:x.decision,
+    operation_index:x.operation_index,
+    path_bindings:(x.path_bindings||[]).map((b:any)=>({
+      parameter_index:b.parameter_index,
+      input_name:b.input_name
+    })),
+    query_bindings:(x.query_bindings||[]).map((b:any)=>({
+      parameter_index:b.parameter_index,
+      source_kind:b.source_kind,
+      input_name:b.input_name==="NONE"?null:b.input_name,
+      literal_index:b.literal_index<0?null:b.literal_index
+    })),
+    output_mappings:(x.output_mappings||[]).map((m:any)=>({
+      output_name:m.output_name,
+      source_kind:m.source_kind,
+      response_path_index:m.response_path_index<0?null:m.response_path_index,
+      input_name:m.input_name==="NONE"?null:m.input_name
+    })),
+    reason:String(x.reason||"")
+  };
+}
+
+export async function synthesize4ar6(
+  config:Config,
+  p:Provider4A,
+  evidence:DocEvidence[],
+  phase:"initial"|"repair",
+  previousError?:string
+) {
+  const ec=BY_ID[p.case_id];
+  if(!ec) throw new Error(`r6_unknown_case:${p.case_id}`);
+
+  const ops=extractDocumentedOperationsR6(evidence,p.case_id);
+  const packetFp=operationPacketFingerprintR6(ops);
+  const packet=ops.map(x=>({
+    operation_id:x.operation_id,
+    origin:x.origin,
+    base_path:x.base_path,
+    operation_path:x.operation_path,
+    full_path:x.full_path,
+    method:x.method,
+    path_parameters:x.path_parameters,
+    query_parameters:x.query_parameters,
+    response_paths:x.response_paths,
+    proof_type:x.proof_type,
+    evidence_ids:x.evidence_ids,
+    source_urls:x.source_urls,
+    score:x.score
+  }));
+
+  if(!ops.length) {
+    return {
+      phase,
+      http_status:0,
+      http_ok:true,
+      refusal:null,
+      raw_content:null,
+      parsed_json:{
+        case_id:p.case_id,
+        provider_candidate_id:p.candidate_id,
+        decision:"REJECT",
+        reason:"R6_NO_DOCUMENTED_OPERATIONS"
+      },
+      parse_error:null,
+      usage:null,
+      latency_ms:0,
+      operation_packet_fingerprint:packetFp,
+      operation_packet:packet,
+      operation_selection:null,
+      operation_proof:null,
+      planner_skipped:true
+    };
+  }
+
+  const system=[
+    "You are MISSING's DocumentedOperation selector and mapper.",
+    "You CANNOT author a URL, path, endpoint parameter name, query parameter name, literal, or response path.",
+    "Select exactly one supplied operation_index or REJECT.",
+    "For path bindings, parameter_index refers only to the selected operation's path_parameters; keep the documented parameter name and map it to one exact case input_name.",
+    "For query bindings, parameter_index refers only to the selected operation's query_parameters. Choose INPUT, a documented LITERAL by literal_index, or OMIT only if optional.",
+    "For outputs, map every required output exactly once. FIELD response_path_index must refer to an exact response_paths entry on the selected operation. INPUT may echo an exact case input when semantically valid.",
+    "Prefer operations whose response paths directly satisfy required outputs and whose required parameters can be bound from case inputs or documented literals.",
+    "Do not guess missing facts. If no supplied operation can satisfy the case, REJECT."
+  ].join(" ");
+
+  const payload={
+    case:{
+      case_id:p.case_id,
+      intent:ec.intent,
+      input_names:ec.input_names,
+      required_outputs:ec.required,
+      build_input:ec.build,
+      replay_input:ec.replay
+    },
+    provider:{candidate_id:p.candidate_id,name:p.name},
+    phase,
+    previous_validation_error:previousError??null,
+    documented_operations:packet
+  };
+
+  const t0=Date.now();
+  const r=await fetch(`${config.baseUrl.replace(/\/$/,"")}/chat/completions`,{
+    method:"POST",
+    headers:{
+      authorization:`Bearer ${config.apiKey}`,
+      "content-type":"application/json"
+    },
+    body:JSON.stringify({
+      model:config.model,
+      temperature:0,
+      messages:[
+        {role:"system",content:system},
+        {role:"user",content:JSON.stringify(payload)}
+      ],
+      response_format:{
+        type:"json_schema",
+        json_schema:selectionSchema([...ec.input_names],[...ec.required],ops)
+      }
+    })
+  });
+  const latency_ms=Date.now()-t0;
+  const text=await r.text();
+  let body:any=null;
+  try { body=JSON.parse(text); } catch {}
+
+  const msg=body?.choices?.[0]?.message;
+  const raw=msg?.content??null;
+  let parsed_json:any=null;
+  let parse_error:string|null=null;
+  let selection:R6Selection|null=null;
+  let proof:any=null;
+
+  if(typeof raw==="string") {
+    try {
+      selection=normalizeSelection(JSON.parse(raw));
+      const materialized=materializeSelectionR6(p.case_id,p.candidate_id,ops,selection);
+      parsed_json=materialized.raw;
+      proof=materialized.proof;
+    } catch(e) {
+      parse_error=String(e).replace(/^Error:\s*/,"");
+    }
+  }
+
+  return {
+    phase,
+    http_status:r.status,
+    http_ok:r.ok,
+    refusal:msg?.refusal??null,
+    raw_content:raw,
+    parsed_json,
+    parse_error,
+    usage:body?.usage??null,
+    latency_ms,
+    operation_packet_fingerprint:packetFp,
+    operation_packet:packet,
+    operation_selection:selection,
+    operation_proof:proof,
+    planner_skipped:false
+  };
+}
