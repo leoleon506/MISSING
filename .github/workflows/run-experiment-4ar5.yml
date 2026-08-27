@@ -1,0 +1,32 @@
+name: Run MISSING Experiment 4A-R5
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  experiment-4ar5:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Run 4A-R5 deterministic evidence recovery benchmark
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-4.1-mini-2025-04-14
+        run: npm run benchmark:4ar5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-4ar5-results
+          path: results/experiment-4ar5/*.json
+          if-no-files-found: error
+          retention-days: 30
