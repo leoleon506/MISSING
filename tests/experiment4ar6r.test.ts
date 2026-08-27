@@ -34,6 +34,24 @@ describe("4A-R6R deterministic operation compiler",()=>{
     expect(op!.response_paths).toEqual(expect.arrayContaining(["id","title","meta.kind"]));
   });
 
+  it("anchors a relative endpoint to a nearby cited API origin instead of the docs origin",()=>{
+    const html=`<pre>GET https://api.example.test/v1/ping?format=json</pre><p>Resource endpoint:</p><pre>GET /v1/items/{id}</pre><pre>{"id":123,"title":"Example"}</pre>`;
+    const inv=extractOperationInventoryR6R([evidence(html,"https://docs.example.test/reference")],"artwork_object_metadata");
+    const op=inv.inventory.find(x=>x.full_path==="/v1/items/{id}");
+    expect(op).toBeTruthy();
+    expect(op!.origin).toBe("https://api.example.test");
+  });
+
+  it("uses camel-case token equivalence for deterministic operation ranking",()=>{
+    const html=`<pre>GET /v1/a/{slug}</pre><pre>{"id":1,"title":"A"}</pre><pre>GET /v1/b/{objectID}</pre><pre>{"id":2,"title":"B"}</pre>`;
+    const inv=extractOperationInventoryR6R([evidence(html,"https://api.example.test/docs")],"artwork_object_metadata");
+    const objectOp=inv.inventory.findIndex(x=>x.path_parameters.some(p=>p.name==="objectID"));
+    const slugOp=inv.inventory.findIndex(x=>x.path_parameters.some(p=>p.name==="slug"));
+    expect(objectOp).toBeGreaterThanOrEqual(0);
+    expect(slugOp).toBeGreaterThanOrEqual(0);
+    expect(objectOp).toBeLessThan(slugOp);
+  });
+
   it("filters static assets and cross-site navigation before the operation packet",()=>{
     const html=`<code>https://api.example.test/v1/items/{id}</code><script src="https://api.example.test/assets/app.js"></script><a href="https://unrelated.example.org/account">account</a><pre>{"id":1,"title":"x"}</pre>`;
     const inv=extractOperationInventoryR6R([evidence(html,"https://api.example.test/docs")],"artwork_object_metadata");
@@ -90,8 +108,9 @@ describe("4A-R6R deterministic operation compiler",()=>{
     expect(generated).toContain("r6r_calls");
   });
 
-  it("compiler and planner contain no known provider-specific recovery seeds",async()=>{
+  it("compiler and planner contain no known provider or workload path seeds",async()=>{
     const core=await readFile(new URL("../src/experiment4ar6rCore.ts",import.meta.url),"utf8"),planner=await readFile(new URL("../src/experiment4ar6rPlanner.ts",import.meta.url),"utf8"),derivation=await readFile(new URL("../src/experiment4ar6rDerivation.ts",import.meta.url),"utf8");
     for(const source of [core,planner,derivation])expect(source).not.toMatch(/thecocktaildb|openfoodfacts|genderize|agify|metmuseum|artic\.edu|nhtsa|registry\.npmjs|ziptastic|themealdb/i);
+    expect(core).not.toMatch(/artworks\?|vehicles\?|meals\?|drinks\?|packages\?|products\?/i);
   });
 });
