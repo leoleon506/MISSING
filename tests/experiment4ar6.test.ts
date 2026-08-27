@@ -2,6 +2,7 @@ import {readFile} from "node:fs/promises";
 import {describe,it,expect} from "vitest";
 import {specSummaryR6,extractDocumentedOperationsR6,materializeSelectionR6,operationPacketFingerprintR6} from "../src/experiment4ar6Core.js";
 import {validate4ar6} from "../src/experiment4ar6Contract.js";
+import {deriveExperiment4ar6Source} from "../src/experiment4ar6Derivation.js";
 import {RecoveryLedger} from "../src/experiment3yrCore.js";
 
 function ev(text:string,url="https://api.example.test/openapi.json"):any {
@@ -174,12 +175,23 @@ describe("4A-R6 documented operation IR",()=>{
     expect(operationPacketFingerprintR6(a)).not.toBe(operationPacketFingerprintR6(b));
   });
 
-  it("contains no provider-specific seeds and keeps frozen derivation anchors",async()=>{
+  it("derives the complete R6 runner from the frozen R4 recovery source",async()=>{
+    const base=await readFile(new URL("../src/experiment4ar.ts",import.meta.url),"utf8");
+    const generated=deriveExperiment4ar6Source(base);
+    expect(generated).toContain('const OUT="results/experiment-4ar6"');
+    expect(generated).toContain("synthesize4ar6 as synthesize4ar");
+    expect(generated).toContain("validate4ar6 as validate4ar");
+    expect(generated).toContain("documented_operation_proof:syn.operation_proof");
+    expect(generated).toContain("GO_4A_R6_DOCUMENTED_OPERATION_IR_RECOVERY");
+    expect(generated).toContain('base_sha:"a5beb7049dcceadcd7e40b6190fa453ba22e4f79"');
+  });
+
+  it("contains no provider-specific seeds",async()=>{
     const core=await readFile(new URL("../src/experiment4ar6Core.ts",import.meta.url),"utf8");
     const planner=await readFile(new URL("../src/experiment4ar6Planner.ts",import.meta.url),"utf8");
-    const runner=await readFile(new URL("../src/experiment4ar6.ts",import.meta.url),"utf8");
-    for(const source of [core,planner]) expect(source).not.toMatch(/thecocktaildb|openfoodfacts|genderize|metmuseum|nhtsa|registry\.npmjs|openlibrary|ziptastic/i);
-    expect(runner).toContain('base_sha:"a5beb7049dcceadcd7e40b6190fa453ba22e4f79"');
-    expect(runner).toContain("GO_4A_R6_DOCUMENTED_OPERATION_IR_RECOVERY");
+    const derivation=await readFile(new URL("../src/experiment4ar6Derivation.ts",import.meta.url),"utf8");
+    for(const source of [core,planner,derivation]) {
+      expect(source).not.toMatch(/thecocktaildb|openfoodfacts|genderize|metmuseum|nhtsa|registry\.npmjs|openlibrary|ziptastic/i);
+    }
   });
 });
