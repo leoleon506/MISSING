@@ -160,7 +160,8 @@ describe("4A-R6 documented operation IR",()=>{
       new RecoveryLedger()
     );
     expect(v.errors).toEqual([]);
-    expect(v.operation_proof.operation_id).toBe(ops[0].operation_id);
+    expect(v.operation_proof).toBeTruthy();
+    expect(v.operation_proof!.operation_id).toBe(ops[0].operation_id);
   });
 
   it("operation packet fingerprints change when documented facts change",()=>{
