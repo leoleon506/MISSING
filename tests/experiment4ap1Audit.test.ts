@@ -7,6 +7,7 @@ describe("4A-P1 source integrity",()=>{
   const activePaths=[
     "../src/experiment4ap1Core.ts",
     "../src/experiment4ap1Runtime.ts",
+    "../src/experiment4ap1Derivation.ts",
     "../src/experiment4ap1Planner.ts",
     "../src/experiment4ap1Request.ts",
     "../src/experiment4ap1Probe.ts",
@@ -17,7 +18,7 @@ describe("4A-P1 source integrity",()=>{
     "../src/experiment4ap1Contract.ts"
   ];
 
-  it("passes the exact provider-blind runtime audit over every active module",async()=>{
+  it("passes the exact provider-blind runtime audit over every active module including the generator",async()=>{
     const sources=await Promise.all(activePaths.map(path=>readFile(new URL(path,import.meta.url),"utf8")));
     const audit=auditProviderBlindSource(sources);
     expect(audit.providerAssignment).toBe(false);
@@ -42,8 +43,9 @@ describe("4A-P1 source integrity",()=>{
     expect(planner).toContain("source_id");
   });
 
-  it("generated runner source-audits P1 plus inherited request extractor modules",async()=>{
+  it("generated runner source-audits P1 generator plus inherited request extractor modules",async()=>{
     const base=await readFile(new URL("../src/experiment4ar.ts",import.meta.url),"utf8"),generated=deriveExperiment4ap1Source(base);
+    expect(generated).toContain("experiment4ap1Derivation.ts");
     expect(generated).toContain("experiment4ap1Request.ts");
     expect(generated).toContain("experiment4ap1Probe.ts");
     expect(generated).toContain("experiment4ar6rEvidence.ts");
