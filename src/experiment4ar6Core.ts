@@ -293,7 +293,7 @@ function parseSummary(e:DocEvidence,caseId:string):DocumentedOperation[] {
           literals:Array.isArray(p.literals)?p.literals.map(String):[]
         }));
       const response_paths:string[]=Array.isArray(operation.response_paths)
-        ? [...new Set(operation.response_paths.map(String))]
+        ? Array.from(new Set<string>((operation.response_paths as any[]).map(x=>String(x))))
         : [];
       const base_path=normalizedBasePath(server.base_path||"");
       const operation_path=normalizedOperationPath(operation.path);
