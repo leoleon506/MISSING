@@ -1,0 +1,26 @@
+import {describe,expect,it} from "vitest";
+import {compileDocumentationIr4F} from "../src/experiment4fIr.js";
+import {prepareRequestGraph4F} from "../src/experiment4fRequest.js";
+import {RecoveryLedger} from "../src/experiment3yrCore.js";
+import {materializeSelectionP1} from "../src/experiment4ap1Core.js";
+import {validate4f} from "../src/experiment4fContract.js";
+import {deriveExperiment4fSource} from "../src/experiment4fDerivation.js";
+import {readFile} from "node:fs/promises";
+const ev=(text:string,extra:any={})=>({evidence_id:extra.evidence_id||"ev1",requested_url:"https://docs.example.test/reference",resolved_url:"https://docs.example.test/reference",state:"ok",status_code:200,text,bytes:text.length,...extra} as any);
+
+describe("4F Documentation IR",()=>{
+  it("decodes inline code entities into one operation",()=>{const ir=compileDocumentationIr4F([ev('<h2>Lookup</h2><code>curl &quot;https://api.example.test/v1/items?name=alpha&amp;format=json&quot;</code>')]);expect(ir.operations.length).toBeGreaterThan(0);expect(ir.operations.some(o=>o.path.includes("name=alpha"))).toBe(true)});
+  it("keeps multiple requests as separate operations",()=>{const ir=compileDocumentationIr4F([ev('<h2>Endpoints</h2><pre>GET https://api.example.test/v1/a/{name}\nGET https://api.example.test/v1/b/{name}</pre>')]);expect(new Set(ir.operations.map(o=>o.path)).size).toBe(2)});
+  it("links ancestor API base to child relative operation",()=>{const ir=compileDocumentationIr4F([ev('<h2>API</h2>Base URL: https://api.example.test<h3>Object lookup</h3><code>GET /v1/objects/[object_id]</code>')]);const op=ir.operations.find(o=>o.path.includes('/v1/objects/'));expect(op?.api_base_relation).toBe("ancestor_section");expect(ir.metrics.ancestorApiBaseLinks).toBeGreaterThan(0)});
+  it("does not cross unrelated API namespaces",()=>{const ir=compileDocumentationIr4F([ev('<h2>First API</h2>Base URL: https://one.example.test<h2>Second API</h2><h3>Lookup</h3><code>GET /v1/items/{name}</code>')]);const op=ir.operations.find(o=>o.path.includes('/v1/items/'));expect(op?.api_base_id).toBeNull()});
+  it("preserves reference-expansion provenance",()=>{const ir=compileDocumentationIr4F([ev('<h2>API</h2><code>GET https://api.example.test/v1/items/{name}</code>',{source_kind:"4e_reference_expansion"})]);expect(ir.metrics.irReferenceDocuments).toBe(1);expect(ir.metrics.irOperationsFromReferenceExpansion).toBeGreaterThan(0);expect(ir.operations[0].source.expanded).toBe(true)});
+});
+
+describe("4F request hard gates",()=>{
+  it("rejects rendered key material before any probe",async()=>{const r=await prepareRequestGraph4F([ev('<h2>Estimate</h2><code>GET https://api.example.test/estimate?name=michael&key=12345</code>')],"age_estimate_by_name",new RecoveryLedger());expect(r.probe_packet).toHaveLength(0);expect(r.metrics.authRequiredOperationsRejected).toBeGreaterThan(0);expect(r.metrics.knownAuthProbeAttempts).toBe(0)});
+  it("rejects explicit bearer auth before any probe",async()=>{const r=await prepareRequestGraph4F([ev('<h2>Estimate</h2>Authorization: Bearer TOKEN<code>GET https://api.example.test/estimate?name=michael</code>')],"age_estimate_by_name",new RecoveryLedger());expect(r.probe_packet).toHaveLength(0)});
+  it("does not bind unrelated generic id",async()=>{const r=await prepareRequestGraph4F([ev('<h2>Webhooks</h2><code>GET https://api.example.test/webhooks/{id}</code>')],"chemical_element_metadata",new RecoveryLedger());expect(r.probe_packet).toHaveLength(0);expect(r.metrics.wrongTaskProbeAttempts).toBe(0)});
+  it("accepts same-IR materialized compile",async()=>{const evidence=[ev('<h2>Name age</h2><code>GET https://api.example.test/age?name=michael</code>')],ledger=new RecoveryLedger(),g=await prepareRequestGraph4F(evidence,"age_estimate_by_name",ledger),h=g.hypotheses[0];expect(h).toBeTruthy();const proof:any={hypothesis:h,record:{hypothesis_id:h.id,disposition:"success",requested_url:"https://api.example.test/age?name=michael",requested_at:new Date().toISOString(),final_url:"https://api.example.test/age?name=michael",content_type:"application/json",response_body_fingerprint:"bodyfp",schema_fingerprint:"schemafp",observed_fields:[{id:"f_age",path:"age",leaf:"age",tokens:["age"],sample_type:"number",sample_value:"42",build_value_relations:[]}],observed_path_count:1,bytes:20,error:null}};const sel:any={decision:"SELECT",hypothesis_id:h.id,output_bindings:[{task_output:"name",source_id:"TASK_INPUT:name"},{task_output:"age",source_id:"f_age"}],reason:"test"},m=materializeSelectionP1("age_estimate_by_name","synthetic",proof,sel);m.raw.reason=`4F_DOCUMENTATION_IR:${h.id}`;const v=validate4f(m.raw,{case_id:"age_estimate_by_name",candidate_id:"synthetic",name:"synthetic",start_url:"https://docs.example.test"} as any,evidence,ledger,proof);expect(v.errors).toEqual([])});
+});
+
+describe("4F benchmark derivation",()=>{it("uses preregistered 4F decision and base",async()=>{const src=await readFile(new URL("../src/experiment4ar.ts",import.meta.url),"utf8"),out=deriveExperiment4fSource(src);expect(out).toContain('GO_4F_DOCUMENTATION_IR_OPERATION_GRAPH');expect(out).toContain('base_sha:"7a3473bf4f04862314660703c54cfd7ef5652632"');expect(out).toContain('authLikeRenderedRequests');expect(out).toContain('r4_recovery_5_of_6')})});
