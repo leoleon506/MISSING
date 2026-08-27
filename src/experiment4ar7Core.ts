@@ -106,7 +106,7 @@ export function materializeSelectionR7(caseId:string,providerId:string,graph:R7P
       source_urls:operation.source_urls,
       origin:operation.origin,
       full_path:operation.full_path,
-      input_bindings,
+      input_bindings:inputBindings,
       literal_bindings:Object.fromEntries(literalBindings),
       output_bindings:Object.fromEntries(selection.output_bindings.map(value=>[value.task_output,value.source_id])),
       no_numeric_indices:true,
