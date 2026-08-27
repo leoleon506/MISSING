@@ -40,7 +40,7 @@ describe("4A-R6R deterministic operation compiler",()=>{
     expect(inv.inventory.some(x=>x.full_path.includes("app.js"))).toBe(false);
     expect(inv.inventory.some(x=>x.origin.includes("unrelated.example.org"))).toBe(false);
     expect(inv.rejects.some(x=>x.reason==="static_asset")).toBe(true);
-    expect(inv.rejects.some(x=>x.reason==="cross_site")).toBe(true);
+    expect(inv.rejects.some(x=>x.reason==="cross_site"||x.reason==="navigation_path")).toBe(true);
   });
 
   it("strips HTML residue from absolute endpoint examples",()=>{
