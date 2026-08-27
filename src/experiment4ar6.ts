@@ -6,4 +6,5 @@ const generatedUrl=new URL("./.generated-experiment4ar6.ts",import.meta.url);
 const source=await readFile(sourceUrl,"utf8");
 const generated=deriveExperiment4ar6Source(source);
 await writeFile(generatedUrl,generated);
-await import("./.generated-experiment4ar6.js");
+const generatedImport="./.generated-experiment4ar6.js";
+await import(generatedImport);
