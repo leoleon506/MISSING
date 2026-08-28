@@ -1,1 +1,1 @@
-export {prepareRequestGraph4J as prepareRequestGraph4H,rebuildRequestGraph4J as rebuildRequestGraph4H} from "./experiment4jRequest.js";
+export {prepareRequestGraph4JTyped as prepareRequestGraph4H,rebuildRequestGraph4JTyped as rebuildRequestGraph4H} from "./experiment4jRequestTyped.js";
