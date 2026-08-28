@@ -16,7 +16,7 @@ const ev=(text:string,expanded=false)=>({
   body_fingerprint:"fp",
   text,
   state:"ok",
-  ...(expanded?{source_kind:"4g_reference_expansion"}:{}),
+  ...(expanded?{source_kind:"4f_reference_expansion"}:{}),
 } as any);
 const metrics=(g:any)=>g.metrics as Record<string,any>;
 
