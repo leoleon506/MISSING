@@ -1,0 +1,81 @@
+import type {DocEvidence,MicroContract} from "./experiment3wCore.js";
+import {compileMicroRequest} from "./experiment3wCore.js";
+import type {RecoveryLedger} from "./experiment3yrCore.js";
+import {FOUR_A_CASES,semanticValidate4a} from "./experiment4aCore.js";
+import type {Provider4A} from "./experiment4aContract.js";
+import type {ProjectionPlan} from "./experiment4arCore.js";
+import {scope4ar4} from "./experiment4ar4Contract.js";
+import {executeProgram} from "./experiment3xCore.js";
+import {contractFromP1Raw} from "./experiment4ap1Core.js";
+import type {P1ProbeProof,P1RequestHypothesis,P1RequestSlot} from "./experiment4ap1Model.js";
+import {rebuildRequestGraph4K} from "./experiment4kRequest.js";
+
+const BY_ID=Object.fromEntries(FOUR_A_CASES.map(r=>[r.case_id,r]));
+const AUTH_NAME=/^(?:api[_-]?key|apikey|key|token|access[_-]?token|secret|authorization|auth|client[_-]?id|client[_-]?secret)$/i;
+const same=(a:any,b:any)=>JSON.stringify(a)===JSON.stringify(b);
+function renderedAuth(raw:any){
+  try{
+    const u=new URL(String(raw.base_url||"")+String(raw.path_template||""));
+    for(const [n] of u.searchParams)if(AUTH_NAME.test(n.replace(/^amp;/i,"")))return true;
+    for(const n of Object.keys(raw.query_bindings||{}))if(AUTH_NAME.test(n.replace(/^amp;/i,"")))return true;
+    for(const n of Object.keys(raw.path_bindings||{}))if(AUTH_NAME.test(n))return true;
+    return false;
+  }catch{return true}
+}
+export function validate4k(raw:any,provider:Provider4A,evidence:DocEvidence[],ledger:RecoveryLedger,probeProof:P1ProbeProof|null){
+  const c=BY_ID[provider.case_id],errors:string[]=[];
+  if(!c)return{errors:["4k_unknown_case"],contract:null as any,projection:null as any,probe_proof:null};
+  if(!raw||typeof raw!=="object"||Array.isArray(raw))return{errors:["4k_contract_not_object"],contract:null as any,projection:null as any,probe_proof:null};
+  if(raw.case_id!==provider.case_id)errors.push("4k_case_id_mismatch");
+  if(raw.provider_candidate_id!==provider.candidate_id)errors.push("4k_provider_id_mismatch");
+  if(raw.decision==="REJECT")return{errors,contract:contractFromP1Raw(raw),projection:null,probe_proof:null};
+  if(raw.decision!=="COMPILE")return{errors:[...errors,"4k_decision_invalid"],contract:null,projection:null,probe_proof:null};
+  if(!probeProof||probeProof.record.disposition!=="success")return{errors:[...errors,"4k_missing_successful_probe_proof"],contract:null,projection:null,probe_proof:null};
+  const graph=rebuildRequestGraph4K(evidence,provider.case_id),hypotheses=graph.hypotheses as P1RequestHypothesis[],prefix="4K_ROUTE_FAMILY_VARIABLE_SLOT:",reason=String(raw.reason||""),id=reason.startsWith(prefix)?reason.slice(prefix.length):"",h=hypotheses.find((x:P1RequestHypothesis)=>x.id===id);
+  if(!h){errors.push("4k_request_hypothesis_not_in_route_family_graph");ledger.record("guard","endpoint_mutations",false,id);return{errors,contract:null,projection:null,probe_proof:null,operation_semantics_fingerprint:graph.semantics.fingerprint}}
+  if(probeProof.hypothesis.id!==h.id)errors.push("4k_probe_hypothesis_mismatch");
+  if(raw.method!=="GET"){errors.push("4k_method_not_get");ledger.record("guard","non_get",false,raw.method)}
+  if(raw.base_url!==h.origin){errors.push("4k_origin_mutated");ledger.record("guard","endpoint_mutations",false,{got:raw.base_url,expected:h.origin})}
+  if(raw.path_template!==h.full_path){errors.push("4k_path_mutated");ledger.record("guard","endpoint_mutations",false,{got:raw.path_template,expected:h.full_path})}
+  if(renderedAuth(raw)||h.slots.some((s:P1RequestSlot)=>s.auth_like||AUTH_NAME.test(s.name.replace(/^amp;/i,"")))){errors.push("4k_auth_like_rendered_request");ledger.record("guard","credentials",false,h.id)}
+  if(raw.probe_schema_fingerprint!==probeProof.record.schema_fingerprint||raw.probe_body_fingerprint!==probeProof.record.response_body_fingerprint)errors.push("4k_probe_fingerprint_mismatch");
+  const bySlot=new Map<string,P1RequestSlot>(h.slots.map((s:P1RequestSlot)=>[s.id,s])),expectedPath:Record<string,string>={},expectedQuery:Record<string,string>={};
+  for(const [input,slotId] of Object.entries(h.input_bindings as Record<string,string>)){
+    const slot=bySlot.get(slotId);if(!slot){errors.push(`4k_missing_slot:${slotId}`);continue}
+    (slot.in==="path"?expectedPath:expectedQuery)[slot.name]=`$input.${input}`;
+  }
+  for(const [slotId,literalId] of Object.entries(h.literal_bindings as Record<string,string>)){
+    const slot=bySlot.get(slotId),literal=slot?.literals.find(l=>l.id===literalId);
+    if(!slot||!literal){errors.push(`4k_literal_proof_missing:${slotId}`);continue}
+    expectedQuery[slot.name]=literal.value;
+  }
+  if(!same(raw.path_bindings||{},expectedPath)){errors.push("4k_path_bindings_mutated");ledger.record("guard","invented_parameters",false,{got:raw.path_bindings,expected:expectedPath})}
+  if(!same(raw.query_bindings||{},expectedQuery)){errors.push("4k_query_bindings_mutated");ledger.record("guard","invented_parameters",false,{got:raw.query_bindings,expected:expectedQuery})}
+  for(const input of c.input_names)if(!Object.keys(h.input_bindings).includes(input)){errors.push(`4k_missing_input_influence:${input}`);ledger.record("guard","invented_parameters",false,input)}
+  const plan=raw.projection as ProjectionPlan;
+  if(!plan||typeof plan!=="object"||Array.isArray(plan))errors.push("4k_projection_invalid");
+  else{
+    const keys=Object.keys(plan).sort(),required=[...c.required].sort();
+    if(keys.length!==required.length||keys.some((k,i)=>k!==required[i]))errors.push("4k_projection_keys_mismatch");
+    const observed=new Set(probeProof.record.observed_fields.map(f=>f.path)),used=new Set<string>();
+    for(const output of c.required){
+      const value:any=(plan as any)[output];
+      if(!value){errors.push(`4k_projection_missing:${output}`);continue}
+      if(value.op==="INPUT"){
+        if(!c.input_names.includes(value.name)){errors.push(`4k_projection_input_invalid:${output}`);ledger.record("guard","ungrounded_projection_fields",false,value.name)}
+      }else if(value.op==="FIELD"){
+        if(!observed.has(value.path)){errors.push(`4k_field_not_observed:${value.path}`);ledger.record("guard","ungrounded_projection_fields",false,value.path)}
+        else if(used.has(value.path))errors.push(`4k_field_reused:${value.path}`);
+        else used.add(value.path);
+      }else{
+        errors.push(`4k_projection_op_forbidden:${output}`);ledger.record("guard","ungrounded_projection_fields",false,value.op);
+      }
+    }
+  }
+  const contract:MicroContract=contractFromP1Raw(raw);
+  return{errors,contract,projection:errors.length?null:plan,probe_proof:errors.length?null:probeProof,operation_semantics_fingerprint:graph.semantics.fingerprint,request_graph_fingerprint:graph.graph_fingerprint};
+}
+export function compile4k(contract:MicroContract,input:Record<string,unknown>){return compileMicroRequest(contract,input)}
+export function project4k(plan:ProjectionPlan,body:any,input:Record<string,unknown>){return executeProgram(plan,body,input) as Record<string,any>}
+export function validateProjected4k(caseId:string,input:Record<string,any>,out:Record<string,any>){return semanticValidate4a(caseId,input,out)}
+export function scope4k(start:string,target:string){return scope4ar4(start,target)}
