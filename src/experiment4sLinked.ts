@@ -19,11 +19,13 @@ export function extractLinkedContractCandidates4S(evidence:{evidence_id:string;r
   }
   return out.slice(0,12);
 }
+function securityRequired(spec:any,op:any){const security=op?.security===undefined?spec?.security:op.security;return Array.isArray(security)&&security.length>0}
+export function countLinkedAuthOperations4S(spec:any){let n=0;for(const item of Object.values(spec?.paths||{}) as any[]){const op=item?.get;if(op&&securityRequired(spec,op))n++}return n}
 export function linkedSpecSummary4S(spec:any){
   const operations:any[]=[];
   for(const [path,item] of Object.entries(spec?.paths||{}) as any[]){
     const common=Array.isArray(item?.parameters)?item.parameters:[];
-    const op=item?.get;if(!op)continue;
+    const op=item?.get;if(!op||securityRequired(spec,op))continue;
     operations.push({method:"GET",path,summary:op.summary||null,description:op.description||null,operationId:op.operationId||null,parameters:[...common,...(Array.isArray(op.parameters)?op.parameters:[])],responses:op.responses||{}});
   }
   return JSON.stringify({openapi:spec?.openapi,swagger:spec?.swagger,servers:spec?.servers,host:spec?.host,basePath:spec?.basePath,schemes:spec?.schemes,operations:operations.slice(0,160)},null,2);
