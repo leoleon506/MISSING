@@ -3,7 +3,7 @@ import {createHash} from "node:crypto";
 import {docScopeAllowed} from "./experiment3wCore.js";
 
 export type MachineSpec4U={format:"json"|"yaml";kind:"openapi3"|"swagger2";spec:any};
-export type RefMetrics4U={operationLocalRefsResolved4u:number;operationLocalRefsRejected4u:number;operationExternalRefsRejected4u:number;operationRefCyclesRejected4u:number;unrelatedRefFailuresIsolated4u:number};
+export type RefMetrics4U={operationLocalRefsResolved4u:number;operationLocalRefsRejected4u:number;operationExternalRefsRejected4u:number;operationExternalRefFetches4u:number;operationRefCyclesRejected4u:number;unrelatedRefFailuresIsolated4u:number};
 export const sha4u=(v:any)=>createHash("sha256").update(typeof v==="string"?v:JSON.stringify(v)).digest("hex");
 export function qualifyMachineSpec4U(text:string){
   let parsed:any=null,format:"json"|"yaml"="json",jsonOk=false,yamlOk=false;
@@ -24,11 +24,14 @@ export function resolveLocalRef4U(root:any,node:any,metrics:RefMetrics4U,seen=ne
 function replaceServerVars(raw:string,vars:any){return raw.replace(/\{([^}]+)\}/g,(_m,n)=>{const d=vars?.[n]?.default;if(d===undefined||d===null)throw new Error("4u_server_variable_missing_default");return encodeURIComponent(String(d))})}
 export function resolveServerOrigin4U(spec:MachineSpec4U,contractUrl:string){
   const root=spec.spec,candidates:string[]=[];
-  if(spec.kind==="openapi3")for(const s of Array.isArray(root.servers)?root.servers:[]){if(typeof s?.url!=="string")continue;try{candidates.push(replaceServerVars(s.url,s.variables))}catch{}}
-  else if(root.host){const schemes=Array.isArray(root.schemes)&&root.schemes.length?root.schemes:[new URL(contractUrl).protocol.replace(":","")];for(const scheme of schemes)candidates.push(`${scheme}://${root.host}${String(root.basePath||"")}`)}
+  if(spec.kind==="openapi3"){
+    const servers=Array.isArray(root.servers)?root.servers:[];
+    if(servers.length){let validServer=false;for(const s of servers){if(typeof s?.url!=="string")continue;try{candidates.push(replaceServerVars(s.url,s.variables));validServer=true}catch{}}if(!validServer)return null}
+  }else if(root.host){const schemes=Array.isArray(root.schemes)&&root.schemes.length?root.schemes:[new URL(contractUrl).protocol.replace(":","")];for(const scheme of schemes)candidates.push(`${scheme}://${root.host}${String(root.basePath||"")}`)}
   if(!candidates.length)candidates.push(new URL(contractUrl).origin);
   for(const raw of candidates){try{const u=new URL(raw,contractUrl);if(docScopeAllowed(contractUrl,u.toString()))return u.toString().replace(/\/$/,"")}catch{}}
   return null;
 }
 export function securityRequired4U(spec:any,op:any){const sec=op?.security===undefined?spec?.security:op.security;return Array.isArray(sec)&&sec.length>0}
+export function responseHasDeferredRefs4U(op:any){try{return /"\$ref"\s*:/.test(JSON.stringify(op?.responses||{}))}catch{return false}}
 export function responseSchemaFingerprint4U(op:any){try{return sha4u(op?.responses||{})}catch{return null}}
