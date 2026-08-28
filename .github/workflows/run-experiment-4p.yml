@@ -1,0 +1,32 @@
+name: Run MISSING Experiment 4P
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  experiment-4p:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Run 4P projection compatibility envelope benchmark
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-4.1-mini-2025-04-14
+        run: npm run benchmark:4p
+      - uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-4p-results
+          path: results/experiment-4p/*.json
+          if-no-files-found: error
+          retention-days: 30
