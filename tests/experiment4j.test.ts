@@ -1,5 +1,6 @@
 import {describe,it,expect} from "vitest";
 import {readFile} from "node:fs/promises";
+import ts from "typescript";
 import {prepareRequestGraph4J,rebuildRequestGraph4J} from "../src/experiment4jRequest.js";
 import {compileRequestHypothesisP1} from "../src/experiment4ap1Request.js";
 import {RecoveryLedger} from "../src/experiment3yrCore.js";
@@ -150,5 +151,13 @@ describe("4J entity-gated documented identifier roles",()=>{
     expect(out).toContain("entity_incompatible_structural_probes_zero");
     expect(out).toContain("placeholder_preservation_failures_zero");
     expect(out).toContain("non_auth_request_text_mutations_zero");
+  });
+
+  it("produces syntactically valid generated benchmark TypeScript",async()=>{
+    const src=await readFile(new URL("../src/experiment4ar.ts",import.meta.url),"utf8");
+    const out=deriveExperiment4jSource(src);
+    const result=ts.transpileModule(out,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022},reportDiagnostics:true,fileName:"generated-4j.ts"});
+    const syntactic=(result.diagnostics||[]).filter(d=>d.category===ts.DiagnosticCategory.Error);
+    expect(syntactic.map(d=>ts.flattenDiagnosticMessageText(d.messageText,"\n"))).toEqual([]);
   });
 });
