@@ -5,7 +5,8 @@ import {fetchTextSafeR2} from "./experiment3yr2Core.js";
 import {discoverReferenceLinks4E} from "./experiment4eRequest.js";
 import {recordReferenceExpansionTrace4N,setCurrentTraceContext4N,clearCurrentTraceContext4N} from "./experiment4nTrace.js";
 
-export async function expandReferenceEvidence4N(evidence:DocEvidence[],caseId:string,providerCandidateId:string,ledger:RecoveryLedger,maxFetches=3){
+type Fetcher=typeof fetchTextSafeR2;
+export async function expandReferenceEvidence4N(evidence:DocEvidence[],caseId:string,providerCandidateId:string,ledger:RecoveryLedger,maxFetches=3,fetcher:Fetcher=fetchTextSafeR2){
   const links=discoverReferenceLinks4E(evidence),seen=new Set(evidence.map(e=>e.resolved_url||e.requested_url));
   let fetches=0,successes=0,added=0;
   setCurrentTraceContext4N(caseId,providerCandidateId);
@@ -15,7 +16,7 @@ export async function expandReferenceEvidence4N(evidence:DocEvidence[],caseId:st
       fetches++;
       const requested_at=new Date().toISOString();
       try{
-        const got=await fetchTextSafeR2(link.sourceUrl,link.target,200000,ledger);
+        const got=await fetcher(link.sourceUrl,link.target,200000,ledger);
         const text=got.text.slice(0,200000),bytes=Buffer.byteLength(text),ev:any={evidence_id:`4n_ref_${sha3yr({source:link.sourceEvidenceId,target:got.final_url,text:text.slice(0,256)}).slice(0,16)}`,provider_candidate_id:providerCandidateId,requested_url:link.target,resolved_url:got.final_url,verified_at:new Date().toISOString(),status:200,content_type:got.content_type,body_fingerprint:sha3yr(text),text,state:"ok",bytes,source_kind:"4n_reference_expansion",parent_evidence_id:link.sourceEvidenceId};
         evidence.push(ev as DocEvidence);seen.add(got.final_url);successes++;added++;
         recordReferenceExpansionTrace4N({parent_evidence_id:link.sourceEvidenceId,requested_url:link.target,final_url:got.final_url,requested_at,status:200,content_type:got.content_type,text});
