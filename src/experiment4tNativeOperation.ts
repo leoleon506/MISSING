@@ -13,7 +13,8 @@ const GENERIC=/^(?:id|name|q|s|query|search|term|value|input)$/i;
 const sha=(v:any)=>createHash("sha256").update(typeof v==="string"?v:JSON.stringify(v)).digest("hex");
 const tokens=(v:string)=>new Set(lexicalTokensP1(v));
 function overlap(a:string,b:string){const x=tokens(a),y=tokens(b);let n=0;for(const t of x)if(y.has(t))n++;return n}
-function scalar(v:string){const s=v.trim();if(!s)return "";if(s==="true")return true;if(s==="false")return false;if(s==="null")return null;if(/^-?\d+(?:\.\d+)?$/.test(s))return Number(s);if((s.startsWith('"')&&s.endsWith('"'))||(s.startsWith("'")&&s.endsWith("'")))return s.slice(1,-1);if(s.startsWith("[")&&s.endsWith("]"))return s.slice(1,-1).split(",").map(x=>scalar(x));return s}
+type Scalar4T=string|number|boolean|null|Scalar4T[];
+function scalar(v:string):Scalar4T{const s=v.trim();if(!s)return "";if(s==="true")return true;if(s==="false")return false;if(s==="null")return null;if(/^-?\d+(?:\.\d+)?$/.test(s))return Number(s);if((s.startsWith('"')&&s.endsWith('"'))||(s.startsWith("'")&&s.endsWith("'")))return s.slice(1,-1);if(s.startsWith("[")&&s.endsWith("]"))return s.slice(1,-1).split(",").map((x:string):Scalar4T=>scalar(x));return s}
 
 // Bounded structural YAML parser for the OpenAPI subset we execute. It preserves
 // mappings/sequences instead of flattening them into prose. JSON remains exact.
