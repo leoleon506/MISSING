@@ -32,6 +32,7 @@ export function resolveServerOrigin4U(spec:MachineSpec4U,contractUrl:string){
   for(const raw of candidates){try{const u=new URL(raw,contractUrl);if(docScopeAllowed(contractUrl,u.toString()))return u.toString().replace(/\/$/,"")}catch{}}
   return null;
 }
+export function splitServerRequest4U(serverUrl:string,operationPath:string){const u=new URL(serverUrl),base=u.pathname.replace(/\/$/,""),op=String(operationPath||"").replace(/^\//,"");const full=`${base}/${op}`.replace(/\/{2,}/g,"/")||"/";return {origin:u.origin,full_path:full.startsWith("/")?full:`/${full}`}}
 export function securityRequired4U(spec:any,op:any){const sec=op?.security===undefined?spec?.security:op.security;return Array.isArray(sec)&&sec.length>0}
 export function responseHasDeferredRefs4U(op:any){try{return /"\$ref"\s*:/.test(JSON.stringify(op?.responses||{}))}catch{return false}}
 export function responseSchemaFingerprint4U(op:any){try{return sha4u(op?.responses||{})}catch{return null}}
