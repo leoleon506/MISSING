@@ -162,19 +162,19 @@ export function induceRouteFamilyHypotheses4K(semantics:SemanticIr4G,caseId:stri
 
 function augmentGraph(base:any,caseId:string){
   const induced=induceRouteFamilyHypotheses4K(base.semantics,caseId),dedup=new Map<string,P1RequestHypothesis>();
-  for(const h of [...base.hypotheses,...induced.hypotheses]){
+  for(const h of [...base.hypotheses,...induced.hypotheses] as P1RequestHypothesis[]){
     const key=fourAp1Sha({origin:h.origin,path:h.full_path,inputs:h.input_bindings,literals:h.literal_bindings});const prior=dedup.get(key);if(!prior||h.score>prior.score)dedup.set(key,h);
   }
   let renderCompileRejected4k=0,renderUrlParseRejected4k=0,authLikeRenderedRequests4k=0;
   const hypotheses=[...dedup.values()].sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id)).filter(h=>{
     const check=renderCheck(h,caseId);if(check.kind==="compile_reject"){renderCompileRejected4k++;return false}if(check.kind==="url_reject"){renderUrlParseRejected4k++;return false}if(check.kind==="auth_like"){authLikeRenderedRequests4k++;return false}return true;
   });
-  return {...base,hypotheses,metrics:{...base.metrics,...induced.metrics,renderCompileRejected4k,renderUrlParseRejected4k,authLikeRenderedRequests4k},graph_fingerprint:fourAp1Sha({base:base.graph_fingerprint,h:hypotheses.map(h=>h.id),rf:induced.metrics})};
+  return {...base,hypotheses,metrics:{...base.metrics,...induced.metrics,renderCompileRejected4k,renderUrlParseRejected4k,authLikeRenderedRequests4k},graph_fingerprint:fourAp1Sha({base:base.graph_fingerprint,h:hypotheses.map((h:P1RequestHypothesis)=>h.id),rf:induced.metrics})};
 }
 
 export async function prepareRequestGraph4K(evidence:DocEvidence[],caseId:string,ledger:RecoveryLedger){
-  const base=await prepareRequestGraph4J(evidence,caseId,ledger),graph=augmentGraph(base,caseId),packet:P1RequestHypothesis[]=[],seen=new Set<string>();let duplicateRenderedProbeUrlsRejected4k=0;
-  for(const h of graph.hypotheses){const check=renderCheck(h,caseId);if(check.kind!=="ok"||!check.url)continue;if(seen.has(check.url)){duplicateRenderedProbeUrlsRejected4k++;continue}seen.add(check.url);packet.push(h);if(packet.length>=FOUR_AP1_MAX_PROBES_PER_PROVIDER)break}
-  return {...graph,probe_packet:packet,metrics:{...graph.metrics,requestHypotheses:graph.hypotheses.length,uniqueRenderedProbeUrls:seen.size,duplicateRenderedProbeUrlsRejected4k,routeFamilyPacketHypotheses:packet.filter(h=>h.proof_type.startsWith("4k_route_family_")).length,expandedEvidenceHypotheses:graph.hypotheses.filter(h=>h.evidence_ids.some(id=>/^4[e-g]_ref_/.test(id))).length,noIrOperation:graph.semantics.operations.length===0,irOperationUnusable:graph.semantics.operations.length>0&&graph.hypotheses.length===0}};
+  const base=await prepareRequestGraph4J(evidence,caseId,ledger),graph=augmentGraph(base,caseId),graphHypotheses=graph.hypotheses as P1RequestHypothesis[],packet:P1RequestHypothesis[]=[],seen=new Set<string>();let duplicateRenderedProbeUrlsRejected4k=0;
+  for(const h of graphHypotheses){const check=renderCheck(h,caseId);if(check.kind!=="ok"||!check.url)continue;if(seen.has(check.url)){duplicateRenderedProbeUrlsRejected4k++;continue}seen.add(check.url);packet.push(h);if(packet.length>=FOUR_AP1_MAX_PROBES_PER_PROVIDER)break}
+  return {...graph,probe_packet:packet,metrics:{...graph.metrics,requestHypotheses:graphHypotheses.length,uniqueRenderedProbeUrls:seen.size,duplicateRenderedProbeUrlsRejected4k,routeFamilyPacketHypotheses:packet.filter((h:P1RequestHypothesis)=>h.proof_type.startsWith("4k_route_family_")).length,expandedEvidenceHypotheses:graphHypotheses.filter((h:P1RequestHypothesis)=>h.evidence_ids.some((id:string)=>/^4[e-g]_ref_/.test(id))).length,noIrOperation:graph.semantics.operations.length===0,irOperationUnusable:graph.semantics.operations.length>0&&graphHypotheses.length===0}};
 }
 export function rebuildRequestGraph4K(evidence:DocEvidence[],caseId:string){return augmentGraph(rebuildRequestGraph4J(evidence,caseId),caseId)}
