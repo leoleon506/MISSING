@@ -7,8 +7,8 @@ export function deriveExperiment4mSource(source:string){
   x=r(x,'import {fetchTextSafeR2,recoveredBroadRetrieveR2,safetyGateFromLedger,RECOVERY_R2_TOP_K} from "./experiment3yr2Core.js";',`import {fetchTextSafeR2,recoveredBroadRetrieveR2,safetyGateFromLedger,RECOVERY_R2_TOP_K} from "./experiment3yr2Core.js";
 import {fetchDocTextSafe4M,fetchSpecTextSafe4M,resetAcquisitionCache4M,acquisitionCacheMetrics4M} from "./experiment4mFetch.js";`);
   x=r(x,'const OUT="results/experiment-4l",MAX_BYTES=FOUR_A_BUDGET.max_bytes;','const OUT="results/experiment-4m",MAX_BYTES=FOUR_A_BUDGET.max_bytes;');
-  x=x.replace('const got=await fetchTextSafeR2(provider.start_url,item.url,MAX_BYTES,ledger),id=pushEvidence','const got=await fetchDocTextSafe4M(provider.start_url,item.url,MAX_BYTES,ledger),id=pushEvidence');
-  x=x.replace('const got=await fetchTextSafeR2(provider.start_url,url,MAX_BYTES,ledger),spec=parseOpenApiText(got.text);','const got=await fetchSpecTextSafe4M(provider.start_url,url,MAX_BYTES,ledger),spec=parseOpenApiText(got.text);');
+  x=r(x,'const got=await fetchTextSafeR2(provider.start_url,item.url,MAX_BYTES,ledger)','const got=await fetchDocTextSafe4M(provider.start_url,item.url,MAX_BYTES,ledger)');
+  x=r(x,'const got=await fetchTextSafeR2(provider.start_url,url,MAX_BYTES,ledger)','const got=await fetchSpecTextSafe4M(provider.start_url,url,MAX_BYTES,ledger)');
   x=r(x,'async function main(){await mkdir(OUT,{recursive:true});','async function main(){resetAcquisitionCache4M();await mkdir(OUT,{recursive:true});');
 
   x=r(x,'executableGateProbe2xxJson4l=0,probeCacheHits4l=0,probeNetworkFetches4l=0,duplicateProbeNetworkFetches4l=0;',`executableGateProbe2xxJson4l=0,probeCacheHits4l=0,probeNetworkFetches4l=0,duplicateProbeNetworkFetches4l=0,
