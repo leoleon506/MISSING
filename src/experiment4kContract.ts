@@ -7,7 +7,7 @@ import type {ProjectionPlan} from "./experiment4arCore.js";
 import {scope4ar4} from "./experiment4ar4Contract.js";
 import {executeProgram} from "./experiment3xCore.js";
 import {contractFromP1Raw} from "./experiment4ap1Core.js";
-import type {P1ProbeProof} from "./experiment4ap1Model.js";
+import type {P1ProbeProof,P1RequestHypothesis,P1RequestSlot} from "./experiment4ap1Model.js";
 import {rebuildRequestGraph4K} from "./experiment4kRequest.js";
 
 const BY_ID=Object.fromEntries(FOUR_A_CASES.map(r=>[r.case_id,r]));
@@ -31,20 +31,20 @@ export function validate4k(raw:any,provider:Provider4A,evidence:DocEvidence[],le
   if(raw.decision==="REJECT")return{errors,contract:contractFromP1Raw(raw),projection:null,probe_proof:null};
   if(raw.decision!=="COMPILE")return{errors:[...errors,"4k_decision_invalid"],contract:null,projection:null,probe_proof:null};
   if(!probeProof||probeProof.record.disposition!=="success")return{errors:[...errors,"4k_missing_successful_probe_proof"],contract:null,projection:null,probe_proof:null};
-  const graph=rebuildRequestGraph4K(evidence,provider.case_id),prefix="4K_ROUTE_FAMILY_VARIABLE_SLOT:",reason=String(raw.reason||""),id=reason.startsWith(prefix)?reason.slice(prefix.length):"",h=graph.hypotheses.find(x=>x.id===id);
+  const graph=rebuildRequestGraph4K(evidence,provider.case_id),hypotheses=graph.hypotheses as P1RequestHypothesis[],prefix="4K_ROUTE_FAMILY_VARIABLE_SLOT:",reason=String(raw.reason||""),id=reason.startsWith(prefix)?reason.slice(prefix.length):"",h=hypotheses.find((x:P1RequestHypothesis)=>x.id===id);
   if(!h){errors.push("4k_request_hypothesis_not_in_route_family_graph");ledger.record("guard","endpoint_mutations",false,id);return{errors,contract:null,projection:null,probe_proof:null,operation_semantics_fingerprint:graph.semantics.fingerprint}}
   if(probeProof.hypothesis.id!==h.id)errors.push("4k_probe_hypothesis_mismatch");
   if(raw.method!=="GET"){errors.push("4k_method_not_get");ledger.record("guard","non_get",false,raw.method)}
   if(raw.base_url!==h.origin){errors.push("4k_origin_mutated");ledger.record("guard","endpoint_mutations",false,{got:raw.base_url,expected:h.origin})}
   if(raw.path_template!==h.full_path){errors.push("4k_path_mutated");ledger.record("guard","endpoint_mutations",false,{got:raw.path_template,expected:h.full_path})}
-  if(renderedAuth(raw)||h.slots.some(s=>s.auth_like||AUTH_NAME.test(s.name.replace(/^amp;/i,"")))){errors.push("4k_auth_like_rendered_request");ledger.record("guard","credentials",false,h.id)}
+  if(renderedAuth(raw)||h.slots.some((s:P1RequestSlot)=>s.auth_like||AUTH_NAME.test(s.name.replace(/^amp;/i,"")))){errors.push("4k_auth_like_rendered_request");ledger.record("guard","credentials",false,h.id)}
   if(raw.probe_schema_fingerprint!==probeProof.record.schema_fingerprint||raw.probe_body_fingerprint!==probeProof.record.response_body_fingerprint)errors.push("4k_probe_fingerprint_mismatch");
-  const bySlot=new Map(h.slots.map(s=>[s.id,s])),expectedPath:Record<string,string>={},expectedQuery:Record<string,string>={};
-  for(const [input,slotId] of Object.entries(h.input_bindings)){
+  const bySlot=new Map<string,P1RequestSlot>(h.slots.map((s:P1RequestSlot)=>[s.id,s])),expectedPath:Record<string,string>={},expectedQuery:Record<string,string>={};
+  for(const [input,slotId] of Object.entries(h.input_bindings as Record<string,string>)){
     const slot=bySlot.get(slotId);if(!slot){errors.push(`4k_missing_slot:${slotId}`);continue}
     (slot.in==="path"?expectedPath:expectedQuery)[slot.name]=`$input.${input}`;
   }
-  for(const [slotId,literalId] of Object.entries(h.literal_bindings)){
+  for(const [slotId,literalId] of Object.entries(h.literal_bindings as Record<string,string>)){
     const slot=bySlot.get(slotId),literal=slot?.literals.find(l=>l.id===literalId);
     if(!slot||!literal){errors.push(`4k_literal_proof_missing:${slotId}`);continue}
     expectedQuery[slot.name]=literal.value;
