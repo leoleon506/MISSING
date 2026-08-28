@@ -7,7 +7,7 @@ import {prepareRequestGraph4J,rebuildRequestGraph4J} from "./experiment4jRequest
 import type {Operation4G,SemanticIr4G} from "./experiment4gSemantics.js";
 
 const AUTH_NAME=/^(?:api[_-]?key|apikey|key|token|access[_-]?token|secret|authorization|auth|client[_-]?id|client[_-]?secret)$/i;
-const ACTION=new Set(["get","lookup","search","find","retrieve","fetch","decode","estimate","resolve","convert","list"]);
+const ACTION=new Set(["get","lookup","search","find","retrieve","fetch","decode","estimate","resolve","convert","list","identify"]);
 const ENTITY_NOISE=new Set([
   "given","public","machine","readable","api","operation","return","returns","canonical","current","human",
   "identify","identifier","identification","metadata","string","numeric","number","matching","queried","query","estimated",
@@ -79,7 +79,7 @@ function familySignals(caseId:string,semantics:SemanticIr4G,members:FamilyMember
   const opTokens=new Set(toks(operationText)),intent=new Set(toks(c.intent||"")),outputs=new Set(c.required.flatMap(x=>toks(x))),inputs=new Set(c.input_names.flatMap(x=>toks(x)));
   const taskActions=new Set([...intent].filter(x=>ACTION.has(x))),opActions=new Set([...opTokens].filter(x=>ACTION.has(x)));
   const entityTokens=new Set([...intent].filter(x=>!ACTION.has(x)&&!outputs.has(x)&&!inputs.has(x)&&!ENTITY_NOISE.has(x)&&x.length>2));
-  const entity=hasOverlap(entityTokens,opTokens),action=hasOverlap(taskActions,opActions),output=hasOverlap(outputs,opTokens);
+  const entity=hasOverlap(entityTokens,opTokens),action=taskActions.size>0&&opActions.size>0,output=hasOverlap(outputs,opTokens);
   return {entity,action,output,count:Number(entity)+Number(action)+Number(output)};
 }
 function shape(v:string){const x=norm(v);if(/^\d+$/.test(x))return `numeric:${x.length}`;if(/^[a-z]+$/i.test(x))return `alpha:${x.length}`;if(/^[a-z0-9]+$/i.test(x))return `alnum:${x.length}`;if(/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(x))return "uuid";return `other:${x.length}`}
