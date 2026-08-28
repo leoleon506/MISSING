@@ -1,0 +1,30 @@
+import type {RecoveryLedger} from "./experiment3yrCore.js";
+import {sha3yr} from "./experiment3yrCore.js";
+import {fetchDocTextSafe4M,fetchSpecTextSafe4M,acquisitionCacheMetrics4M} from "./experiment4mFetch.js";
+import {fetchTextSafeR2} from "./experiment3yr2Core.js";
+
+export type ExecutedTraceStage4N="CRAWL"|"REFERENCE_EXPANSION"|"STANDARD_SPEC"|"EMBEDDED_SPEC"|"DOCUMENTED_EXAMPLE";
+export type ExecutedTraceDisposition4N="success"|"error";
+export type ExecutedTraceOrigin4N="network"|"cache";
+export type ExecutedGetTrace4N={trace_id:string;case_id:string;provider_candidate_id:string;stage:ExecutedTraceStage4N;parent_evidence_ids:string[];requested_url:string;final_url:string|null;requested_at:string;disposition:ExecutedTraceDisposition4N;content_type:string|null;body_fingerprint:string|null;body_bytes:number;response_text:string;network_origin:ExecutedTraceOrigin4N;error:string|null};
+export type TraceConsumerContext4N={case_id:string;provider_candidate_id:string;stage:ExecutedTraceStage4N;parent_evidence_ids:string[]};
+type Fetcher=typeof fetchTextSafeR2;
+const TRACES:ExecutedGetTrace4N[]=[];
+const MAX_TRACE_CONTEXT_BYTES=200000;
+let seq=0,CURRENT:{case_id:string;provider_candidate_id:string}|null=null;
+function stableUrl(url:string){try{return new URL(url).toString()}catch{return url}}
+function traceId(ctx:TraceConsumerContext4N,url:string,requestedAt:string){return `trace4n_${sha3yr({n:++seq,c:ctx.case_id,p:ctx.provider_candidate_id,s:ctx.stage,u:stableUrl(url),at:requestedAt}).slice(0,18)}`}
+function contextSlice(text:string){return Buffer.byteLength(text)<=MAX_TRACE_CONTEXT_BYTES?text:Buffer.from(text).subarray(0,MAX_TRACE_CONTEXT_BYTES).toString("utf8")}
+function pushTrace(ctx:TraceConsumerContext4N,args:{requested_url:string;final_url:string|null;requested_at:string;disposition:ExecutedTraceDisposition4N;content_type:string|null;text:string;network_origin:ExecutedTraceOrigin4N;error:string|null}){
+  const ok=args.disposition==="success",trace:ExecutedGetTrace4N={trace_id:traceId(ctx,args.requested_url,args.requested_at),case_id:ctx.case_id,provider_candidate_id:ctx.provider_candidate_id,stage:ctx.stage,parent_evidence_ids:[...new Set(ctx.parent_evidence_ids)],requested_url:stableUrl(args.requested_url),final_url:args.final_url?stableUrl(args.final_url):null,requested_at:args.requested_at,disposition:args.disposition,content_type:args.content_type,body_fingerprint:ok?sha3yr(args.text):null,body_bytes:ok?Buffer.byteLength(args.text):0,response_text:ok?contextSlice(args.text):"",network_origin:args.network_origin,error:args.error};TRACES.push(trace);return trace;
+}
+function cacheOrigin(before:any,after:any,kind:"doc"|"spec"){const hit=kind==="doc"?Number(after.acquisitionCacheHits)-Number(before.acquisitionCacheHits):Number(after.specProbeCacheHits)-Number(before.specProbeCacheHits);return hit>0?"cache" as const:"network" as const}
+export function resetExecutedTraceGraph4N(){TRACES.splice(0,TRACES.length);seq=0;CURRENT=null}
+export function setCurrentTraceContext4N(case_id:string,provider_candidate_id:string){CURRENT={case_id,provider_candidate_id}}
+export function clearCurrentTraceContext4N(){CURRENT=null}
+export function executedTraces4N(case_id?:string,provider_candidate_id?:string){return TRACES.filter(t=>(!case_id||t.case_id===case_id)&&(!provider_candidate_id||t.provider_candidate_id===provider_candidate_id)).map(t=>({...t,parent_evidence_ids:[...t.parent_evidence_ids]}))}
+export function executedTraceRegistryMetrics4N(){const events=TRACES.length,network=TRACES.filter(t=>t.network_origin==="network").length,cache=TRACES.filter(t=>t.network_origin==="cache").length,urls=new Set(TRACES.map(t=>t.requested_url)).size,byStage=Object.fromEntries((["CRAWL","REFERENCE_EXPANSION","STANDARD_SPEC","EMBEDDED_SPEC","DOCUMENTED_EXAMPLE"] as ExecutedTraceStage4N[]).map(s=>[s,TRACES.filter(t=>t.stage===s).length]));return {executedTraceEvents:events,executedTraceNetworkEvents:network,executedTraceCacheReuseEvents:cache,executedTraceDistinctUrls:urls,executedTraceByStage:byStage}}
+async function tracedCached(kind:"doc"|"spec",ctx:TraceConsumerContext4N,startUrl:string,url:string,maxBytes:number,ledger:RecoveryLedger,fetcher?:Fetcher){const requested_at=new Date().toISOString(),before=acquisitionCacheMetrics4M();try{const got=kind==="doc"?await fetchDocTextSafe4M(startUrl,url,maxBytes,ledger,fetcher):await fetchSpecTextSafe4M(startUrl,url,maxBytes,ledger,fetcher),after=acquisitionCacheMetrics4M(),origin=cacheOrigin(before,after,kind);pushTrace(ctx,{requested_url:url,final_url:got.final_url,requested_at,disposition:"success",content_type:got.content_type,text:got.text,network_origin:origin,error:null});return got}catch(e){const after=acquisitionCacheMetrics4M(),origin=cacheOrigin(before,after,kind),error=String(e).replace(/^Error:\s*/,"");pushTrace(ctx,{requested_url:url,final_url:null,requested_at,disposition:"error",content_type:null,text:"",network_origin:origin,error});throw e}}
+export function fetchDocTextSafe4N(ctx:TraceConsumerContext4N,startUrl:string,url:string,maxBytes:number,ledger:RecoveryLedger,fetcher?:Fetcher){return tracedCached("doc",ctx,startUrl,url,maxBytes,ledger,fetcher)}
+export function fetchSpecTextSafe4N(ctx:TraceConsumerContext4N,startUrl:string,url:string,maxBytes:number,ledger:RecoveryLedger,fetcher?:Fetcher){return tracedCached("spec",ctx,startUrl,url,maxBytes,ledger,fetcher)}
+export function recordReferenceExpansionTrace4N(args:{parent_evidence_id:string;requested_url:string;final_url:string|null;requested_at:string;status:number;content_type:string|null;text:string;error?:string|null}){if(!CURRENT)return null;const ctx:TraceConsumerContext4N={case_id:CURRENT.case_id,provider_candidate_id:CURRENT.provider_candidate_id,stage:"REFERENCE_EXPANSION",parent_evidence_ids:[args.parent_evidence_id]},ok=args.status>=200&&args.status<300&&!!args.text;return pushTrace(ctx,{requested_url:args.requested_url,final_url:args.final_url,requested_at:args.requested_at,disposition:ok?"success":"error",content_type:args.content_type,text:ok?args.text:"",network_origin:"network",error:ok?null:(args.error||`http_${args.status||0}`)})}
