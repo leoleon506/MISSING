@@ -1,0 +1,31 @@
+name: Experiment 4U Preflight
+
+on:
+  push:
+    branches:
+      - experiment-4u-spec-qualified-lazy-openapi-universal-frozen-proof
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Generate deterministic package lock
+        run: npm install --package-lock-only --ignore-scripts
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: experiment-4u-preflight-lock
+          path: package-lock.json
+          if-no-files-found: error
+          retention-days: 3
