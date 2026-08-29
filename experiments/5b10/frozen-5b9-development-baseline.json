@@ -1,0 +1,19 @@
+{
+  "source": {
+    "main_sha": "dcadf26c927de338afc6be479e9378080336076a",
+    "workflow_run_id": 33274709276,
+    "artifact_id": 9721239656,
+    "artifact_digest": "sha256:a56277d05544ffb353833521fbbf1606d992f25ecdba8e2f123b69087e146f82",
+    "report_fingerprint": "2b95b83208d40650cecce7e056484b8aa56d64ad80dfdaef15e2c2685c7e82bd",
+    "decision": "REASSESS_5B9_VERIFIED_SELECTED_PROVIDER_ACQUISITION_RECOVERY"
+  },
+  "strict_success_families": [
+    "games",
+    "geography",
+    "language",
+    "network",
+    "space"
+  ],
+  "strict_success_family_count": 5,
+  "purpose": "post-run decision comparison only; this file is not imported by acquisition, provider selection, synthesis, ranking, execution, or replay treatment code"
+}
