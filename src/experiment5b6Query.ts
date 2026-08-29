@@ -4,8 +4,8 @@ import {FOUR_A_CASES} from "./experiment4aCore.js";
 import type {Provider4A} from "./experiment4aContract.js";
 import {extractOperationInventoryR6R} from "./experiment4ar6rEvidence.js";
 import type {R6ROperation,R6RParam} from "./experiment4ar6rModel.js";
-import {fourAp1Sha,lexicalTokensP1} from "./experiment4ap1Request.js";
-import type {P1RequestHypothesis,P1RequestSlot} from "./experiment4ap1Model.js";
+import {lexicalTokensP1} from "./experiment4ap1Request.js";
+import {fourAp1Sha,type P1RequestHypothesis,type P1RequestSlot} from "./experiment4ap1Model.js";
 import {semanticRole5B2,type SemanticRole5B2} from "./experiment5b2Semantics.js";
 import {sectionRoleCoverage5B5} from "./experiment5b5Section.js";
 
@@ -13,14 +13,12 @@ const AUTH_LIKE=/^(?:authorization|auth|api[_-]?key|apikey|key|token|access[_-]?
 const GENERIC_QUERY=/^(?:q|query|search|term|s|value|input)$/i;
 const MAX_OPERATION_CONTEXT=3600,MAX_PARAM_CONTEXT=900;
 const uniq=<T>(xs:T[])=>[...new Set(xs)];
-const norm=(v:any)=>String(v??"").trim().toLowerCase();
 const overlap=(a:string,b:string)=>{const x=new Set(lexicalTokensP1(a)),y=lexicalTokensP1(b);return y.filter(t=>x.has(t)).length};
 const identityLike=(r:SemanticRole5B2)=>!["pagination","descriptive","version","date","measure","generic"].includes(r);
 function roleScore(input:string,param:string){const a=semanticRole5B2(input),b=semanticRole5B2(param);if(a===b&&a!=="generic")return 130;if((a==="identifier"&&b==="code")||(a==="code"&&b==="identifier"))return 90;if(a==="name"&&["username","lexical","identifier"].includes(b))return 60;if(b==="name"&&["username","lexical","identifier"].includes(a))return 60;if(identityLike(a)&&identityLike(b))return 35;return 0}
 function sourceEvidence(op:R6ROperation,evidence:DocEvidence[]){for(const id of op.evidence_ids){const e=evidence.find(x=>x.evidence_id===id&&x.state==="ok");if(e)return e}return null}
 function operationContext(op:R6ROperation,evidence:DocEvidence[]){const e=sourceEvidence(op,evidence);if(!e)return {e:null as DocEvidence|null,text:"",start:0,end:0};const center=op.request_offset??0,start=Math.max(0,center-MAX_OPERATION_CONTEXT/2),end=Math.min(e.text.length,center+MAX_OPERATION_CONTEXT/2);return {e,text:e.text.slice(start,end),start,end}}
 function parameterContext(name:string,operationText:string){const lower=operationText.toLowerCase(),needle=name.toLowerCase();let i=lower.indexOf(needle);if(i<0)return operationText.slice(0,MAX_PARAM_CONTEXT);const start=Math.max(0,i-MAX_PARAM_CONTEXT/2),end=Math.min(operationText.length,i+needle.length+MAX_PARAM_CONTEXT/2);return operationText.slice(start,end)}
-function taskAnchorCount(c:any,text:string){const inputText=(c.input_names||[]).join(" "),task=String(c.intent||"");return overlap(inputText,text)+overlap(task,text)}
 function slotFor(op:R6ROperation,param:R6RParam):P1RequestSlot{const id=`par_${fourAp1Sha({kind:"5b6_query",operation:op.operation_id,name:param.name}).slice(0,14)}`;return {id,name:param.name,in:"query",required:param.required,auth_like:AUTH_LIKE.test(param.name),literals:[]}}
 
 type Candidate={param:R6RParam;slot:P1RequestSlot;score:number;binding_class:"lexical"|"role"|"generic_context";context:string};
