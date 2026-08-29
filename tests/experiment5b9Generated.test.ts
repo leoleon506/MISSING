@@ -1,0 +1,12 @@
+import {describe,expect,it} from "vitest";
+import {readFile} from "node:fs/promises";
+import ts from "typescript";
+import {deriveExperiment5b9Source} from "../src/experiment5b9Derivation.js";
+import {deriveExperiment5b9PlannerSource} from "../src/experiment5b9PlannerDerivation.js";
+
+function finalSource(s:string){return s.replace("async function rerank(async function rerank(","async function rerank(")}
+describe("Experiment 5B9 generated benchmark integrity",()=>{
+ it("produces syntactically valid generated benchmark and planner TypeScript",async()=>{const core=await readFile(new URL("../src/experiment4ar.ts",import.meta.url),"utf8"),planner=await readFile(new URL("../src/experiment5b6Planner.ts",import.meta.url),"utf8"),outs=[finalSource(deriveExperiment5b9Source(core)),deriveExperiment5b9PlannerSource(planner)];for(const [i,out] of outs.entries()){const result=ts.transpileModule(out,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022},reportDiagnostics:true,fileName:`generated-5b9-${i}.ts`}),errors=(result.diagnostics||[]).filter(d=>d.category===ts.DiagnosticCategory.Error).map(d=>ts.flattenDiagnosticMessageText(d.messageText,"\n"));expect(errors).toEqual([])}});
+ it("replaces only acquisition around the frozen 5B8 planner and preserves two-request beam",async()=>{const core=await readFile(new URL("../src/experiment4ar.ts",import.meta.url),"utf8"),planner=deriveExperiment5b9PlannerSource(await readFile(new URL("../src/experiment5b6Planner.ts",import.meta.url),"utf8")),out=finalSource(deriveExperiment5b9Source(core));expect(out).toContain('from "./experiment5b9Recovery.js"');expect(out).toContain("crawl5b9(p,ledger,originalStart)");expect(out).toContain("httpsUpgradeCandidate5B9(originalStart)");expect(out).toContain("recovery_lineage_5b9");expect(out).toContain("maxDocumentationFetchesPerProvider5b9");expect(out).toContain("recovery_fetches:recoveryMetrics5b9.recoveryFetchAttempts5b9-before.recoveryFetchAttempts5b9");expect(planner).toContain("dedup.slice(0,2)");expect(planner).toContain("buildGatedQueryHypotheses5B8(baseEvidence,provider)")});
+ it("caps ordinary plus recovery acquisition at the inherited page/depth budget",async()=>{const core=await readFile(new URL("../src/experiment4ar.ts",import.meta.url),"utf8"),out=finalSource(deriveExperiment5b9Source(core));expect(out).toContain("fetchCount>=maxPages");expect(out).toContain("fetchCount<maxPages");expect(out).toContain("candidate.depth<=FOUR_A_BUDGET.max_doc_depth");expect(out).not.toContain("max_doc_pages_per_provider+4")});
+});
