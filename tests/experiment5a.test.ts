@@ -36,8 +36,9 @@ describe("Experiment 5A preregistered holdout",()=>{
 });
 
 describe("Experiment 5A frozen-engine boundary",()=>{
- it("allows only additive 5A paths",()=>{expect(fiveAPathAllowed("experiments/5a/README.md")).toBe(true);expect(fiveAPathAllowed("experiments/5a/ERRATA.md")).toBe(true);expect(fiveAPathAllowed("src/experiment5a.ts")).toBe(true);expect(fiveAPathAllowed("tests/experiment5a.test.ts")).toBe(true);expect(fiveAPathAllowed(".github/workflows/run-experiment-5a.yml")).toBe(true);expect(fiveAPathAllowed("src/experiment4wPlanner.ts")).toBe(false);expect(fiveAPathAllowed("package.json")).toBe(false)});
+ it("allows only additive 5A paths",()=>{expect(fiveAPathAllowed("experiments/5a/README.md")).toBe(true);expect(fiveAPathAllowed("experiments/5a/ERRATA.md")).toBe(true);expect(fiveAPathAllowed("experiments/5a/HOTFIX-001.md")).toBe(true);expect(fiveAPathAllowed("src/experiment5a.ts")).toBe(true);expect(fiveAPathAllowed("tests/experiment5a.test.ts")).toBe(true);expect(fiveAPathAllowed(".github/workflows/run-experiment-5a.yml")).toBe(true);expect(fiveAPathAllowed("src/experiment4wPlanner.ts")).toBe(false);expect(fiveAPathAllowed("package.json")).toBe(false)});
  it("contains no literal provider URL seed in 5A runtime TypeScript",async()=>{const files=["experiment5aCore.ts","experiment5aHarness.ts","experiment5a.ts"],text=(await Promise.all(files.map(f=>readFile(new URL(`../src/${f}`,import.meta.url),"utf8")))).join("\n");expect(text).not.toMatch(/https?:\/\/[A-Za-z0-9]/)});
+ it("waits for the frozen 4W child process instead of racing an in-process import",async()=>{const text=await readFile(new URL("../src/experiment5a.ts",import.meta.url),"utf8");expect(text).toContain("execFileSync(process.execPath");expect(text).toContain('"src/experiment4w.ts"');expect(text).not.toContain('await import("./experiment4w.js")')});
 });
 
 describe("Experiment 5A decision logic",()=>{
