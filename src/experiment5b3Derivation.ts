@@ -2,7 +2,7 @@ import {deriveExperiment5b2Source} from "./experiment5b2Derivation.js";
 function r(s:string,a:string,b:string){if(!s.includes(a))throw new Error(`5b3_anchor_missing:${a.slice(0,180)}`);return s.replace(a,b)}
 function replaceBetween(s:string,start:string,end:string,replacement:string){const a=s.indexOf(start),b=s.indexOf(end,a+start.length);if(a<0||b<0)throw new Error(`5b3_range_anchor_missing:${start}`);return s.slice(0,a)+replacement+s.slice(b)}
 export function deriveExperiment5b3Source(source:string){let x=deriveExperiment5b2Source(source);
-x=r(x,'import {callProviderReranker,parseRerankAttempt} from "./experiment3vPlanner.js";','import {deterministicProviderSelection5B3,providerOrderingDeterminism5B3} from "./experiment5b3Provider.js";');
+x='import {deterministicProviderSelection5B3,providerOrderingDeterminism5B3} from "./experiment5b3Provider.js";\n'+x;
 x=r(x,'import {compile5b2 as compile4ar,project5b2 as project4ar,scope5b2 as scope4ar,validate5b2 as validate4ar,validateProjected5b2 as validateProjected4ar} from "./experiment5b2Contract.js";','import {compile5b3 as compile4ar,project5b3 as project4ar,scope5b3 as scope4ar,validate5b3 as validate4ar,validateProjected5b3 as validateProjected4ar} from "./experiment5b3Contract.js";');
 x=r(x,'import {synthesize5b2 as synthesize4ar} from "./experiment5b2Planner.js";','import {synthesize5b3 as synthesize4ar} from "./experiment5b3Planner.js";');
 x=r(x,'const OUT="results/experiment-5b2-engine",MAX_BYTES=FOUR_A_BUDGET.max_bytes;','const OUT="results/experiment-5b3-engine",MAX_BYTES=FOUR_A_BUDGET.max_bytes;');
