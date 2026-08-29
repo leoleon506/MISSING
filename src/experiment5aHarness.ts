@@ -103,15 +103,15 @@ function witnessSafe(recipe:any){
 
 export function buildFiveAReport(raw:any,integrity:FiveAIntegrity,cases:FiveACase[]=FIVE_A_CASES){
   const caseById=new Map(cases.map(c=>[c.case_id,c]));
-  const expectedIds=new Set(cases.map(c=>c.case_id));
+  const expectedIds=new Set<string>(cases.map(c=>String(c.case_id)));
   const caseEvidence=Array.isArray(raw?.caseEvidence)?raw.caseEvidence:[];
   const recipes=Array.isArray(raw?.recipes)?raw.recipes:[];
   const replay=Array.isArray(raw?.replay)?raw.replay:[];
   const rerank=Array.isArray(raw?.rerankEvidence)?raw.rerankEvidence:[];
   const llm=Array.isArray(raw?.llmUsage)?raw.llmUsage:[];
   const m=raw?.metrics||{};
-  const evidenceIds=caseEvidence.map((r:any)=>String(r.case_id));
-  const evidenceSet=new Set(evidenceIds);
+  const evidenceIds:string[]=caseEvidence.map((r:any)=>String(r.case_id));
+  const evidenceSet=new Set<string>(evidenceIds);
   const successRows=caseEvidence.filter((r:any)=>!!r?.success&&caseById.has(String(r.case_id)));
   const successIds=new Set<string>(successRows.map((r:any)=>String(r.case_id)));
   const recipeIds=new Set<string>(recipes.filter((r:any)=>caseById.has(String(r.case_id))).map((r:any)=>String(r.case_id)));
