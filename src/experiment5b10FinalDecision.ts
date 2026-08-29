@@ -1,0 +1,9 @@
+import {createHash} from "node:crypto";
+import {buildFiveB10Report} from "./experiment5b10Decision.js";
+import type {FiveB10Integrity} from "./experiment5b10Harness.js";
+
+const sha=(v:any)=>createHash("sha256").update(JSON.stringify(v)).digest("hex");
+function witness(r:any){return r?.recovery_candidate_witness_5b10||r?.contract?.raw?.recovery_candidate_witness_5b10||null}
+function recoveryRecipe(r:any){const w=witness(r);return !!(w&&typeof w.candidate_id==="string"&&Number(w.beam_position)>=1&&Number(w.beam_position)<=2&&w.ranking_bonus===false)}
+
+export function buildFiveB10FinalReport(raw:any,integrity:FiveB10Integrity,baseline:any){const report:any=buildFiveB10Report(raw,integrity),families=new Set((baseline?.strict_success_families||[]).map(String)),successRows=(raw?.caseEvidence||[]).filter((r:any)=>r?.success),successIds=new Set(successRows.map((r:any)=>String(r.case_id))),familyByCase=new Map(successRows.map((r:any)=>[String(r.case_id),String(r.family)])),recoveryRecipes=(raw?.recipes||[]).filter((r:any)=>successIds.has(String(r.case_id))&&recoveryRecipe(r)),newFamilyRecipes=recoveryRecipes.filter((r:any)=>{const family=familyByCase.get(String(r.case_id));return !!family&&!families.has(family)});report.metrics.recovery_new_family_recipes=newFamilyRecipes.length;report.metrics.frozen_5b9_success_family_count=families.size;report.gates.recovery_new_family_active=newFamilyRecipes.length>=1;report.gates.frozen_5b9_family_baseline_present=families.size===5;report.frozen_5b9_baseline_source=baseline?.source||null;report.frozen_5b9_success_families=[...families].sort();report.decision=Object.values(report.gates).every(Boolean)?"GO_5B10_RECOVERY_AWARE_SYNTHESIS_GRAPH_SINGLE_BEAM_ADMISSION":"REASSESS_5B10_RECOVERY_AWARE_SYNTHESIS_GRAPH_SINGLE_BEAM_ADMISSION";delete report.fingerprint;report.fingerprint=sha(report);return report}
