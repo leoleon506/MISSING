@@ -10,25 +10,16 @@ import {buildQueryHypotheses5B6,type QueryProof5B6} from "./experiment5b6Query.j
 const sha=(v:any)=>createHash("sha256").update(typeof v==="string"?v:JSON.stringify(v)).digest("hex");
 const uniq=<T>(xs:T[])=>[...new Set(xs)];
 const STOP=new Set(["api","public","service","endpoint","request","response","data","result","object","get","query","search","lookup","find","fetch","return","retrieve","metadata","information","details","id","identifier","code","name","value","current","machine","readable","operation","operations","string","example","http","https","the","and","for","with","from","using","given","into","about"]);
-const ACTION_CLASSES:Record<string,string[]>= {
-  preview:["preview","thumbnail","snippet"],
-  check:["check","validate","validation","health","status","verify","verification","ssl","certificate"],
-  normalize:["normalize","normalise","conversion","convert","transform","canonicalize","canonicalise"],
-  score:["score","rank","ranking","rating"],
-  statistics:["stats","statistics","aggregate","aggregation","count","counts"],
-  translate:["translate","translation"],
-  generate:["generate","generation","create","creation"],
-  mutate:["update","delete","remove","write","insert","patch","post"]
-};
+const ACTION_CLASSES:Record<string,string[]>= {preview:["preview","thumbnail","snippet"],check:["check","validate","validation","health","status","verify","verification","ssl","certificate"],normalize:["normalize","normalise","conversion","convert","transform","canonicalize","canonicalise"],score:["score","rank","ranking","rating"],statistics:["stats","statistics","aggregate","aggregation","count","counts"],translate:["translate","translation"],generate:["generate","generation","create","creation"],mutate:["update","delete","remove","write","insert","patch","post"]};
 const ACTION_WORDS=new Set(Object.values(ACTION_CLASSES).flat());
 const INPUT_SUFFIX_STOP=new Set(["id","identifier","code","name","key","value","number","num"]);
 const distinct=(xs:string[])=>uniq(xs.map(x=>x.toLowerCase()).filter(x=>x.length>2&&!STOP.has(x)));
-function entityTokens(c:any){const input=(c.input_names||[]).flatMap((n:string)=>lexicalTokensP1(n).filter(t=>!INPUT_SUFFIX_STOP.has(t)));const intent=lexicalTokensP1(String(c.intent||"")).filter(t=>!ACTION_WORDS.has(t));const outputs=(c.required||[]).flatMap((n:string)=>lexicalTokensP1(n)).filter(t=>!STOP.has(t));return distinct([...input,...intent,...outputs]).filter(t=>!ACTION_WORDS.has(t))}
+function entityTokens(c:any){const input=(c.input_names||[]).flatMap((n:string)=>lexicalTokensP1(n).filter(t=>!INPUT_SUFFIX_STOP.has(t))),intent=lexicalTokensP1(String(c.intent||"")).filter(t=>!ACTION_WORDS.has(t));return distinct([...input,...intent]).filter(t=>!ACTION_WORDS.has(t))}
 function actionTokens(c:any){return distinct(lexicalTokensP1(String(c.intent||"")).filter(t=>ACTION_WORDS.has(t)||/^(?:resolve|definition|geocode|locate|catalog|profile|record|package|license)$/.test(t)))}
 function outputTokens(c:any){return distinct((c.required||[]).flatMap((n:string)=>lexicalTokensP1(n)))}
 function pathTokens(h:P1RequestHypothesis){return distinct(lexicalTokensP1(h.full_path.replace(/[{}]/g," ")))}
 function capsuleFor(h:P1RequestHypothesis,capsules:DocEvidence[]){return capsules.find(e=>(h.evidence_ids||[]).includes(e.evidence_id))||null}
-function opTokens(h:P1RequestHypothesis,cap:DocEvidence|null){let obj:any={};try{obj=cap?JSON.parse(cap.text):{}}catch{}const params=Array.isArray(obj?.query_parameters)?obj.query_parameters:[],queryNames=params.map((p:any)=>String(p?.name||"")),contexts=params.map((p:any)=>String(p?.context||"")),responses=Array.isArray(obj?.response_paths)?obj.response_paths.map(String):[];const local=distinct([...pathTokens(h),...queryNames.flatMap((x:string)=>lexicalTokensP1(x)),...contexts.flatMap((x:string)=>lexicalTokensP1(x)),...responses.flatMap((x:string)=>lexicalTokensP1(x))]);return {all:local,query_names:distinct(queryNames.flatMap((x:string)=>lexicalTokensP1(x))),response:distinct(responses.flatMap((x:string)=>lexicalTokensP1(x))),context:distinct(contexts.flatMap((x:string)=>lexicalTokensP1(x))),params}}
+function opTokens(h:P1RequestHypothesis,cap:DocEvidence|null){let obj:any={};try{obj=cap?JSON.parse(cap.text):{}}catch{}const params=Array.isArray(obj?.query_parameters)?obj.query_parameters:[],queryNames=params.map((p:any)=>String(p?.name||"")),contexts=params.map((p:any)=>String(p?.context||"")),responses=Array.isArray(obj?.response_paths)?obj.response_paths.map(String):[],local=distinct([...pathTokens(h),...queryNames.flatMap((x:string)=>lexicalTokensP1(x)),...contexts.flatMap((x:string)=>lexicalTokensP1(x)),...responses.flatMap((x:string)=>lexicalTokensP1(x))]);return {all:local,query_names:distinct(queryNames.flatMap((x:string)=>lexicalTokensP1(x))),response:distinct(responses.flatMap((x:string)=>lexicalTokensP1(x))),context:distinct(contexts.flatMap((x:string)=>lexicalTokensP1(x))),params}}
 function specializedClasses(tokens:string[]){const s=new Set(tokens),out:string[]=[];for(const [k,words] of Object.entries(ACTION_CLASSES))if(words.some(w=>s.has(w)))out.push(k);return out.sort()}
 function taskClasses(actions:string[]){return specializedClasses(actions)}
 function overlap(a:string[],b:string[]){const s=new Set(b);return a.filter(x=>s.has(x))}
