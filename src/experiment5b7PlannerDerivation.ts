@@ -1,0 +1,7 @@
+function r(s:string,a:string,b:string){if(!s.includes(a))throw new Error(`5b7_planner_anchor_missing:${a.slice(0,160)}`);return s.replace(a,b)}
+export function deriveExperiment5b7PlannerSource(source:string){let x=source;
+x=r(x,'import {buildQueryHypotheses5B6,queryCompilerDeterminism5B6} from "./experiment5b6Query.js";','import {buildGatedQueryHypotheses5B7,querySemanticGateDeterminism5B7} from "./experiment5b7Gate.js";');
+x=x.replaceAll('buildQueryHypotheses5B6(baseEvidence,provider)','buildGatedQueryHypotheses5B7(baseEvidence,provider)').replaceAll('queryCompilerDeterminism5B6(baseEvidence,provider)','querySemanticGateDeterminism5B7(baseEvidence,provider)');
+x=r(x,'materialized.raw.query_operation_witness_5b6=isQuery?{...queryProofById.get(h.id),final_request_ordering_fingerprint:finalFingerprint}:null;','materialized.raw.query_operation_witness_5b6=isQuery?{...queryProofById.get(h.id),final_request_ordering_fingerprint:finalFingerprint}:null;materialized.raw.query_semantic_gate_witness_5b7=isQuery?(queryProofById.get(h.id) as any)?.semantic_gate_witness_5b7??null:null;');
+x=x.replaceAll('export async function synthesize5b6','export async function synthesize5b7').replaceAll('5b6_unknown_case','5b7_unknown_case').replaceAll('5B6_QUERY_ORIENTED:','5B7_ENTITY_COUPLED_QUERY:').replaceAll('5B6_ALIGNED_OPERATION:','5B7_ALIGNED_OPERATION:').replaceAll('5B6_SECTION_LOCAL_BEAM:','5B7_SECTION_LOCAL_BEAM:');
+return x}
