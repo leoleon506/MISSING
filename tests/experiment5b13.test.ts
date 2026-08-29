@@ -1,0 +1,10 @@
+import {describe,expect,it} from "vitest";
+import {correctedBindingScore5B13,rankRequestBeam5B13} from "../src/experiment5b13Utility.js";
+const evidence:any=[{evidence_id:"p-e01",provider_candidate_id:"p",requested_url:"https://docs.example.test/api",resolved_url:"https://docs.example.test/api",verified_at:"2026-01-01T00:00:00Z",status:200,content_type:"text/html",body_fingerprint:"fp",text:`${"noise ".repeat(2500)} Search television show metadata with https://api.example.test/singlesearch/shows?q=girls returning name and premiered fields`,state:"ok"}];
+const c:any={input_names:["show_name"],required:["name","premiered"],intent:"television show metadata"};
+function docH():any{return {id:"doc",source_operation_id:"documentary_x",origin:"https://api.example.test",full_path:"/singlesearch/shows?q=girls",proof_type:"5b12_documentary_request_template",evidence_ids:["p-e01"],source_urls:["https://api.example.test/singlesearch/shows?q=girls"],slots:[{id:"slot_q",name:"q",in:"query",required:true,auth_like:false,literals:[{id:"l",value:"girls"}]}],input_bindings:{show_name:"slot_q"},literal_bindings:{},score:90,concrete_relation:false}}
+describe("Experiment 5B13 request-local documentary utility",()=>{
+ it("scores input-to-slot bindings in the declared direction",()=>{const b=correctedBindingScore5B13(c,docH());expect(b.covered).toBe(1);expect(b.unresolved).toBe(0);expect(b.invalidRefs).toBe(0);expect(b.score).toBe(100)});
+ it("uses local evidence beyond the frozen broad 12k prefix",()=>{const h=docH(),w=new Map([["doc",{source_evidence_id:"p-e01"}]]),r=rankRequestBeam5B13(c,[h],evidence,new Map(),w);expect(r.ordering[0].documentary_local_span_found).toBe(true);expect(r.ordering[0].output_coverage).toBeGreaterThan(0);expect(r.metrics.documentaryLocalSpanMissing5b13).toBe(0)});
+ it("does not award a documentary ranking bonus",()=>{const h=docH(),plain={...h,id:"plain",proof_type:"plain",score:90},r=rankRequestBeam5B13(c,[h,plain],evidence,new Map(),new Map([["doc",{source_evidence_id:"p-e01"}]]));expect(r.ordering.every((x:any)=>!("documentary_bonus" in x))).toBe(true)});
+});
