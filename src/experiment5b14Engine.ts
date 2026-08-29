@@ -6,4 +6,5 @@ await writeFile(new URL("./.generated-experiment5b14Planner.ts",import.meta.url)
 const source=await readFile(new URL("./experiment4ar.ts",import.meta.url),"utf8");
 const generated=deriveExperiment5b14Source(source).replace("async function rerank(async function rerank(","async function rerank(");
 await writeFile(new URL("./.generated-experiment5b14.ts",import.meta.url),generated);
-await import("./.generated-experiment5b14.js");
+const generatedImport="./.generated-experiment5b14.js";
+await import(generatedImport);
