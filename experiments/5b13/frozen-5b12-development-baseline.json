@@ -1,0 +1,12 @@
+{
+  "source_experiment": "5B12",
+  "source_run_id": 33278968471,
+  "source_head_sha": "82c4b35294dffc0b7a9a6142f1ea488116122dd1",
+  "source_report_fingerprint": "b65139005c1b5a5dea20627472be7e4c8af6cc6417ea39109550d2ed1d64f636",
+  "strict_success_count": 6,
+  "strict_success_families": ["games", "geography", "language", "network", "space"],
+  "distinct_providers": 6,
+  "persisted_recipes": 6,
+  "replay_successes": 5,
+  "replay_rate": 0.8333333333333334
+}
