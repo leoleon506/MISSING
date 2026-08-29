@@ -57,7 +57,7 @@ export function inspectFiveAIntegrity(cwd=process.cwd()):FiveAIntegrity{
   const overlap=ids.filter(id=>DEV_CASE_IDS.has(id));
   const buildReplayChanged=FIVE_A_CASES.every(c=>JSON.stringify(c.build)!==JSON.stringify(c.replay));
   if(FIVE_A_CASES.length!==18)errors.push(`case_count:${FIVE_A_CASES.length}`);
-  if(families.size!==10)errors.push(`family_count:${families.size}`);
+  if(families.size!==11)errors.push(`family_count:${families.size}`);
   if(!unique)errors.push("duplicate_case_id");
   if(overlap.length)errors.push(`development_case_overlap:${overlap.join(",")}`);
   if(!buildReplayChanged)errors.push("unchanged_replay_input");
