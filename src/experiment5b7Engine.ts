@@ -5,4 +5,5 @@ const planner=await readFile(new URL("./experiment5b6Planner.ts",import.meta.url
 await writeFile(new URL("./.generated-experiment5b7Planner.ts",import.meta.url),deriveExperiment5b7PlannerSource(planner));
 const source=await readFile(new URL("./experiment4ar.ts",import.meta.url),"utf8");
 await writeFile(new URL("./.generated-experiment5b7.ts",import.meta.url),deriveExperiment5b7Source(source));
-await import("./.generated-experiment5b7.js");
+const generatedImport="./.generated-experiment5b7.js";
+await import(generatedImport);
