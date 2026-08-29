@@ -39,11 +39,12 @@ export async function synthesize5b4(config:Config,provider:Provider4A,evidence:D
 
   const nativeProofById=new Map((native.proofs||[]).map((p:any)=>[p.hypothesis_id,p]));
   const collectionProofById=new Map((collection.proofs||[]).map((p:any)=>[p.hypothesis_id,p]));
+  const utilityProofById=new Map<string,any>([...(native.proofs||[]),...(collection.proofs||[])].map((p:any)=>[p.hypothesis_id,p]));
   const historicalPrimary=(request.probe_packet||[])[0] as P1RequestHypothesis|undefined;
   const all=[...(request.probe_packet||[]),...(native.hypotheses||[]),...(collection.hypotheses||[])];
-  const det=requestOrderingDeterminism5B3(c,all,utilityEvidence,nativeProofById,historicalPrimary);if(!det.ok)metrics.requestOrderingNondeterminismRejects5b3++;
-  const preliminary=rankRequestBeam5B3(c,all,utilityEvidence,nativeProofById,historicalPrimary);add(metrics,preliminary.metrics);
-  for(const row of preliminary.ordering){if(!collectionProofById.has(row.hypothesis_id))continue;metrics.collectionOperationOutputCoverage5b4+=Number(row.output_coverage||0);metrics.collectionOperationTaskScore5b4+=Number(row.task_score||0)}
+  const det=requestOrderingDeterminism5B3(c,all,utilityEvidence,utilityProofById,historicalPrimary);if(!det.ok)metrics.requestOrderingNondeterminismRejects5b3++;
+  const preliminary=rankRequestBeam5B3(c,all,utilityEvidence,utilityProofById,historicalPrimary);add(metrics,preliminary.metrics);
+  for(const row of preliminary.ordering)if(collectionProofById.has(row.hypothesis_id))metrics.collectionOperationTaskScore5b4+=Number(row.task_score||0);
 
   const byId=new Map(preliminary.ordering.map((o:any)=>[o.hypothesis_id,o])),dedup:P1RequestHypothesis[]=[],seen=new Set<string>();
   for(const h of preliminary.hypotheses){const fp=shape(h);if(seen.has(fp))continue;seen.add(fp);dedup.push(h)}
