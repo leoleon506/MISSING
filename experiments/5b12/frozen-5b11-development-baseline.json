@@ -1,0 +1,14 @@
+{
+  "experiment": "5B11",
+  "workflow_run": 33277245806,
+  "artifact_id": 9722001733,
+  "artifact_digest": "sha256:76fa99beba3f607e807cb7f2dabc98c56479771ca415382953c59d86f49678f9",
+  "report_fingerprint": "18ac215644c9fc12ac46085b00d512546521db8e03386722383bebbfc430a4de",
+  "formal_decision": "REASSESS_5B11_EVIDENCE_FAITHFUL_DOCUMENTED_REQUEST_TEMPLATE_COMPILATION",
+  "strict_successes": 6,
+  "strict_success_families": ["games", "geography", "language", "network", "space"],
+  "distinct_successful_providers": 6,
+  "replay_successes": 6,
+  "replay_rate": 1,
+  "actual_max_request_beam": 2
+}
