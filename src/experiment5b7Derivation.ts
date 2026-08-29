@@ -1,0 +1,12 @@
+import {deriveExperiment5b6Source} from "./experiment5b6Derivation.js";
+function r(s:string,a:string,b:string){if(!s.includes(a))throw new Error(`5b7_anchor_missing:${a.slice(0,180)}`);return s.replace(a,b)}
+export function deriveExperiment5b7Source(source:string){let x=deriveExperiment5b6Source(source);
+x=r(x,'import {compile5b6 as compile4ar,project5b6 as project4ar,scope5b6 as scope4ar,validate5b6 as validate4ar,validateProjected5b6 as validateProjected4ar} from "./experiment5b6Contract.js";','import {compile5b7 as compile4ar,project5b7 as project4ar,scope5b7 as scope4ar,validate5b7 as validate4ar,validateProjected5b7 as validateProjected4ar} from "./experiment5b7Contract.js";');
+x=r(x,'import {synthesize5b6 as synthesize4ar} from "./experiment5b6Planner.js";','import {synthesize5b7 as synthesize4ar} from "./.generated-experiment5b7Planner.js";');
+x=r(x,'const OUT="results/experiment-5b6-engine",MAX_BYTES=FOUR_A_BUDGET.max_bytes;','const OUT="results/experiment-5b7-engine",MAX_BYTES=FOUR_A_BUDGET.max_bytes;');
+x=r(x,'query_operation_witness_5b6:a.parsed_json?.query_operation_witness_5b6??null};','query_operation_witness_5b6:a.parsed_json?.query_operation_witness_5b6??null,query_semantic_gate_witness_5b7:a.parsed_json?.query_semantic_gate_witness_5b7??null};');
+x=r(x,'query_operation_witness_5b6:syn.query_operation_witness_5b6??null,contract,contract_fingerprint:sha3yr(contract)','query_operation_witness_5b6:syn.query_operation_witness_5b6??null,query_semantic_gate_witness_5b7:syn.query_semantic_gate_witness_5b7??null,contract,contract_fingerprint:sha3yr(contract)');
+x=x.replaceAll('experiment:"5B6-ENGINE"','experiment:"5B7-ENGINE"').replaceAll('purpose:"development_query_oriented_parameter_local_compiler_engine"','purpose:"development_entity_coupled_query_operation_gate_engine"').replaceAll('base_sha:"addfcdb0012a800e418ed58f8ea684406a05edfb"','base_sha:"f5e97aa85e6f40c94812c9243c01369c4dfb30d4"');
+x=x.replaceAll('./experiment5b6Contract.ts','./experiment5b7Contract.ts').replaceAll('./experiment5b6Derivation.ts','./experiment5b7Derivation.ts');
+x=x.replace('(await readFile(new URL("./experiment5b6Query.ts",import.meta.url),"utf8"))+"\\n"+(await readFile(new URL("./experiment4uOpenApi.ts",import.meta.url),"utf8"))+','(await readFile(new URL("./experiment5b6Query.ts",import.meta.url),"utf8"))+"\\n"+(await readFile(new URL("./experiment5b7Gate.ts",import.meta.url),"utf8"))+"\\n"+(await readFile(new URL("./experiment4uOpenApi.ts",import.meta.url),"utf8"))+');
+return x}
