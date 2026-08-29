@@ -1,0 +1,12 @@
+{
+  "source": {
+    "workflow_run": 33276122259,
+    "artifact_id": 9721640711,
+    "artifact_digest": "sha256:14038642ed8693b87c0d4f64c3c403d483bd1e8d31bd0bc46875b95d6216a1ef",
+    "report_fingerprint": "b2d31307b7ab7b2bf3ee71b06c87ea9579b1c191a5aa53f0766c88263551809d"
+  },
+  "strict_success_families": ["games", "geography", "language", "network", "space"],
+  "strict_successes": 6,
+  "distinct_successful_providers": 6,
+  "replay_successes": 6
+}
