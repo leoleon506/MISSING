@@ -1,0 +1,10 @@
+import type {RecoveryLedger} from "./experiment3yrCore.js";
+import type {DocEvidence} from "./experiment3wCore.js";
+import {FOUR_A_CASES} from "./experiment4aCore.js";
+import type {Provider4A} from "./experiment4aContract.js";
+import type {P1RequestHypothesis} from "./experiment4ap1Model.js";
+import {buildNativeHypotheses4W} from "./experiment4wNativeOperation.js";
+import {outputCoverage5B} from "./experiment5bResponse.js";
+import {sha4u} from "./experiment4uOpenApi.js";
+
+export async function buildNativeHypotheses5B(evidence:DocEvidence[],provider:Provider4A,ledger:RecoveryLedger){const base=await buildNativeHypotheses4W(evidence,provider,ledger),c=FOUR_A_CASES.find(x=>x.case_id===provider.case_id),metrics:any={...base.metrics,outputCoverageCandidates5b:0,outputRolesDocumented5b:0,outputRolesUnsupported5b:0,operationsRankedByOutputCoverage5b:0,operationsRejectedNoOutputSupport5b:0};if(!c||!base.hypotheses.length)return {...base,metrics};const proofById=new Map((base.proofs||[]).map((p:any)=>[p.hypothesis_id,p])),rows:{h:P1RequestHypothesis;coverage:any;proof:any}[]=[];for(const h of base.hypotheses){const proof:any=proofById.get(h.id),coverage=outputCoverage5B(proof?.operation,c.required);metrics.outputCoverageCandidates5b++;metrics.outputRolesDocumented5b+=coverage.supported_roles.length;metrics.outputRolesUnsupported5b+=coverage.unsupported_roles.length;if(coverage.score>0)metrics.operationsRankedByOutputCoverage5b++;rows.push({h:{...h,score:h.score+coverage.score},coverage,proof})}const hasSupported=rows.some(r=>r.coverage.score>0),kept=hasSupported?rows.filter(r=>r.coverage.score>0):rows;if(hasSupported)metrics.operationsRejectedNoOutputSupport5b=rows.length-kept.length;kept.sort((a,b)=>b.h.score-a.h.score||b.coverage.supported_roles.length-a.coverage.supported_roles.length||a.h.id.localeCompare(b.h.id));const hypotheses=kept.map(r=>r.h),proofs=kept.map(r=>({...r.proof,output_coverage_5b:r.coverage,output_coverage_fingerprint_5b:sha4u(r.coverage),score_components:{...(r.proof?.score_components||{}),output_coverage_5b:r.coverage.score}}));return {hypotheses,proofs,metrics}}
