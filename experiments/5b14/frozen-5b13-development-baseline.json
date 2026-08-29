@@ -1,0 +1,11 @@
+{
+  "source_experiment": "5B13",
+  "source_decision": "REASSESS_5B13_REQUEST_LOCAL_DOCUMENTARY_SEMANTIC_UTILITY",
+  "source_report_fingerprint": "b18242ff960b1b87554c5c752619a16e79a2b361fd9a739c0d2195a60dcf93ce",
+  "strict_successes": 6,
+  "strict_success_families": ["games", "geography", "language", "network", "space"],
+  "distinct_providers": 6,
+  "persisted_recipes": 6,
+  "replay_successes": 6,
+  "replay_total": 6
+}

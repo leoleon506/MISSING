@@ -1,0 +1,7 @@
+import {describe,expect,it} from "vitest";
+import {provenanceNeutralBindingScore5B14,requestUtility5B14} from "../src/experiment5b14Utility.js";
+
+describe("Experiment 5B14 symmetric request-local operation compatibility",()=>{
+ it("keeps binding feasibility provenance-neutral",()=>{const c={input_names:["show_name"]},base:any={id:"a",source_operation_id:"x",origin:"https://example.test",full_path:"/shows/{show_name}",proof_type:"x",evidence_ids:[],source_urls:[],slots:[{id:"s1",name:"show_name",in:"path",required:true,auth_like:false,literals:[]}],input_bindings:{show_name:"s1"},literal_bindings:{},score:1,concrete_relation:false};expect(provenanceNeutralBindingScore5B14(c,base).score).toBe(100);expect(provenanceNeutralBindingScore5B14(c,{...base,concrete_relation:true}).score).toBe(100)});
+ it("does not use broad document fallback when no local occurrence exists",()=>{const c={input_names:["query"],intent:"television show",required:["name"]},h:any={id:"a",source_operation_id:"op",origin:"https://example.test",full_path:"/unrelated/{query}",proof_type:"x",evidence_ids:["e1"],source_urls:["https://example.test/unrelated/{query}"],slots:[{id:"s1",name:"query",in:"path",required:true,auth_like:false,literals:[]}],input_bindings:{query:"s1"},literal_bindings:{},score:1,concrete_relation:false},e:any=[{evidence_id:"e1",state:"ok",text:"television show name json swagger response but no request occurrence"}];const u=requestUtility5B14(c,h,e,new Map().get("a"));expect(u.request_local_span_found).toBe(false);expect(u.structured_evidence).toBe(0)});
+});
