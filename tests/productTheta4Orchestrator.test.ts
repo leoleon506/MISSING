@@ -24,7 +24,7 @@ function ready(l = lead()): OpenApiCompileResult {
       projection: { valid: { op: "FIELD", path: "valid" } }, required: ["valid"],
       verification_inputs: [{ vat_number: "FI1" }, { vat_number: "FI2" }],
     },
-    verification_input_evidence: [], missing: [], reason: null,
+    verification_input_evidence: [], provider_readiness: { credentials_required: [], response_schema_missing: false }, missing: [], reason: null,
   };
 }
 
