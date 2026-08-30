@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 import { demandSnapshot, type DemandObservation } from "./discovery.js";
 import { attemptRecipe } from "./executor.js";
 import { recipesForCapability, registerPromotedRecipe } from "./recipes.js";
@@ -51,6 +52,10 @@ export interface SupplyVerification {
   recipe: VerifiedRecipe | null;
 }
 
+export function supplyAcquisitionEnabled(): boolean {
+  return process.env.MISSING_SUPPLY_ACQUISITION_ENABLED === "1";
+}
+
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === "object") {
@@ -81,6 +86,44 @@ export function candidateFingerprint(candidate: SupplyCandidate): string {
   return createHash("sha256").update(JSON.stringify(recipeMaterial(candidate))).digest("hex");
 }
 
+function isPrivateIpv4(hostname: string): boolean {
+  const octets = hostname.split(".").map(Number);
+  if (octets.length !== 4 || octets.some(value => !Number.isInteger(value) || value < 0 || value > 255)) return false;
+  const [a, b] = octets;
+  return a === 10
+    || a === 127
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || a === 0;
+}
+
+function isPrivateIpv6(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "::1"
+    || normalized === "::"
+    || /^f[cd][0-9a-f]{2}:/.test(normalized)
+    || /^fe[89ab][0-9a-f]:/.test(normalized);
+}
+
+function isInternalHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/, "");
+  if (normalized === "localhost" || normalized.endsWith(".localhost") || normalized.endsWith(".local") || normalized.endsWith(".internal")) return true;
+  const family = isIP(normalized);
+  if (family === 4) return isPrivateIpv4(normalized);
+  if (family === 6) return isPrivateIpv6(normalized);
+  return false;
+}
+
+function validateCandidateUrl(raw: string, label: string) {
+  const url = new URL(raw);
+  const testLoopback = process.env.NODE_ENV === "test" && (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "::1" || url.hostname === "[::1]");
+  if (!testLoopback && url.protocol !== "https:") throw new Error(`${label} must use HTTPS`);
+  if (!testLoopback && isInternalHostname(url.hostname)) throw new Error(`${label} cannot target a private or internal host`);
+  if (url.username || url.password) throw new Error(`${label} cannot contain URL credentials`);
+  return url;
+}
+
 function validateCandidate(candidate: SupplyCandidate) {
   if (!candidate.candidate_id.trim()) throw new Error("candidate_id is required");
   if (!/^[a-z][a-z0-9_]*$/.test(candidate.capability)) throw new Error("capability must be a lowercase snake_case identifier");
@@ -90,11 +133,8 @@ function validateCandidate(candidate: SupplyCandidate) {
   for (const field of candidate.required) {
     if (!candidate.projection[field]) throw new Error(`Required output is not projected: ${field}`);
   }
-  const base = new URL(candidate.base_url);
-  const local = base.hostname === "127.0.0.1" || base.hostname === "localhost" || base.hostname === "::1";
-  if (base.protocol !== "https:" && !local) throw new Error("Supply candidates must use HTTPS except for local verification fixtures");
-  const evidence = new URL(candidate.evidence_url);
-  if (evidence.protocol !== "https:" && !local) throw new Error("evidence_url must use HTTPS except for local verification fixtures");
+  validateCandidateUrl(candidate.base_url, "base_url");
+  validateCandidateUrl(candidate.evidence_url, "evidence_url");
 }
 
 function toVerificationRecipe(candidate: SupplyCandidate, verifiedAt: string): VerifiedRecipe {
