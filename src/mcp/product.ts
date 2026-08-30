@@ -1,10 +1,33 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, verifySupplyCandidate } from "../runtime/acquisition.js";
 import { demandSnapshot, demandSummary, recordDemand, searchCapabilities } from "../runtime/discovery.js";
 import { resolveCapability, runtimeHealth } from "../runtime/executor.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 
 const content = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
+
+const projectionRuleSchema = z.union([
+  z.object({ op: z.literal("INPUT"), name: z.string().min(1) }),
+  z.object({ op: z.literal("FIELD"), path: z.string().min(1) }),
+]);
+
+const supplyCandidateSchema = z.object({
+  candidate_id: z.string().min(2).describe("Stable identifier for the provider candidate"),
+  demand_intent: z.string().min(2).describe("Observed agent demand this candidate is intended to satisfy"),
+  capability: z.string().regex(/^[a-z][a-z0-9_]*$/).describe("Proposed lowercase snake_case capability identifier"),
+  family: z.string().min(1),
+  provider: z.string().min(1),
+  evidence_url: z.string().url().describe("Public documentation/evidence URL supporting the candidate mapping"),
+  method: z.literal("GET"),
+  base_url: z.string().url(),
+  path_template: z.string().min(1),
+  path_bindings: z.record(z.string(), z.string()),
+  query_bindings: z.record(z.string(), z.string()),
+  projection: z.record(z.string(), projectionRuleSchema),
+  required: z.array(z.string().min(1)).min(1),
+  verification_inputs: z.array(z.record(z.string(), z.unknown())).min(2).describe("At least two independent inputs that must both replay successfully before promotion"),
+});
 
 export function registerProductTools(server: McpServer) {
   server.registerTool("list_verified_capabilities", {
@@ -32,6 +55,23 @@ export function registerProductTools(server: McpServer) {
     description: "Return unresolved capability demand observed by MISSING, ordered by repeated demand and reconstructed from the durable demand ledger when configured.",
     inputSchema: z.object({}),
   }, async () => content({ demand: demandSnapshot(), summary: demandSummary() }));
+
+  server.registerTool("missing_supply_opportunities", {
+    description: "Rank unresolved agent demand as supply-acquisition opportunities. This reports demand only; it never claims that an unverified provider exists.",
+    inputSchema: z.object({
+      limit: z.number().int().min(1).max(50).optional(),
+    }),
+  }, async args => content({ opportunities: rankSupplyOpportunities(args.limit ?? 10) }));
+
+  server.registerTool("verify_supply_candidate", {
+    description: "Live-replay a proposed GET provider recipe against at least two verification inputs. This does not register the candidate and returns rejected on any failed replay or projection.",
+    inputSchema: supplyCandidateSchema,
+  }, async args => content(await verifySupplyCandidate(args)));
+
+  server.registerTool("acquire_verified_supply_candidate", {
+    description: "Verify a proposed provider candidate with repeated live replay and, only if every gate passes, promote it into MISSING's durable executable recipe registry. Failed candidates are never registered.",
+    inputSchema: supplyCandidateSchema,
+  }, async args => content(await acquireVerifiedSupplyCandidate(args)));
 
   server.registerTool("resolve_capability", {
     description: "Execute a capability using only a replay-verified provider recipe. Returns unavailable rather than inventing an unverified integration.",
