@@ -1,4 +1,4 @@
-import { rankRecipesForExecution, recordAgentRankAttempt } from "./agentRank.js";
+import { rankRecipesForExecution, recordAgentRankAttempt, selectAgentRankExplorationRecipe } from "./agentRank.js";
 import { recipesForCapability } from "./recipes.js";
 import type { ResolveResult, RuntimeAttempt, RuntimeHealth, RuntimeInput, VerifiedRecipe } from "./types.js";
 
@@ -7,6 +7,7 @@ const FAILURE_THRESHOLD = 2;
 const OPEN_MS = 60_000;
 
 const health = new Map<string, RuntimeHealth>();
+const explorationInFlight = new Set<string>();
 
 function stateFor(recipe: VerifiedRecipe): RuntimeHealth {
   const existing = health.get(recipe.recipe_fingerprint);
@@ -112,20 +113,46 @@ function markFailure(recipe: VerifiedRecipe) {
   }
 }
 
+function scheduleAgentRankExploration(capability: string, registered: VerifiedRecipe[], selectedRecipe: VerifiedRecipe, timeoutMs: number) {
+  const explorationRecipe = selectAgentRankExplorationRecipe(registered, selectedRecipe.recipe_fingerprint);
+  if (!explorationRecipe || explorationInFlight.has(explorationRecipe.recipe_fingerprint)) return;
+  explorationInFlight.add(explorationRecipe.recipe_fingerprint);
+
+  // Privacy boundary: shadow probes use only the recipe's already-verified example input.
+  // User inputs and outputs are never copied to an alternate provider for exploration.
+  void attemptRecipe(explorationRecipe, explorationRecipe.example_input, timeoutMs)
+    .then(result => {
+      recordAgentRankAttempt({
+        capability,
+        attempt: result.attempt,
+        attemptPosition: 0,
+        rescue: false,
+        source: "exploration",
+      });
+    })
+    .catch(() => {
+      // attemptRecipe normally converts exceptions into RuntimeAttempt; this is an
+      // extra guard so advisory exploration can never affect a user resolution.
+    })
+    .finally(() => explorationInFlight.delete(explorationRecipe.recipe_fingerprint));
+}
+
 export async function resolveCapability(capability: string, input: RuntimeInput, options: { timeoutMs?: number } = {}): Promise<ResolveResult> {
   const registered = recipesForCapability(capability);
   if (!registered.length) return { status: "unavailable", capability, reason: "No replay-verified recipe is registered for this capability", attempts: [] };
 
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const recipes = rankRecipesForExecution(registered);
   const attempts: RuntimeAttempt[] = [];
   for (const recipe of recipes) {
     if (stateFor(recipe).state === "open") continue;
-    const result = await attemptRecipe(recipe, input, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const result = await attemptRecipe(recipe, input, timeoutMs);
     const attemptPosition = attempts.length;
     attempts.push(result.attempt);
     recordAgentRankAttempt({ capability, attempt: result.attempt, attemptPosition, rescue: attemptPosition > 0 && Boolean(result.output) });
     if (result.output) {
       markSuccess(recipe);
+      scheduleAgentRankExploration(capability, registered, recipe, timeoutMs);
       return { status: "resolved", capability, provider: recipe.provider, recipe_fingerprint: recipe.recipe_fingerprint, output: result.output, attempts };
     }
     markFailure(recipe);
@@ -145,4 +172,5 @@ export function runtimeHealth(): RuntimeHealth[] {
 
 export function resetRuntimeHealth() {
   health.clear();
+  explorationInFlight.clear();
 }
