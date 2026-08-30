@@ -70,7 +70,12 @@ export function projectRecipeOutput(recipe: VerifiedRecipe, input: RuntimeInput,
   return output;
 }
 
-async function attemptRecipe(recipe: VerifiedRecipe, input: RuntimeInput, timeoutMs: number): Promise<{ attempt: RuntimeAttempt; output?: Record<string, unknown> }> {
+/**
+ * Execute exactly one recipe without touching circuit-breaker state.
+ * Product Theta uses this primitive to verify supply candidates before they
+ * are eligible for registration in the executable recipe registry.
+ */
+export async function attemptRecipe(recipe: VerifiedRecipe, input: RuntimeInput, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<{ attempt: RuntimeAttempt; output?: Record<string, unknown> }> {
   const started = Date.now();
   let url: string | null = null;
   try {
