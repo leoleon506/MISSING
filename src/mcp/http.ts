@@ -10,6 +10,12 @@ import { createProductServer } from "./server.js";
 
 export const productMcpHandler = createMcpHandler(() => createProductServer());
 
+export function publicBaseUrl(port = Number(process.env.PORT ?? 3000), host = process.env.HOST ?? "127.0.0.1"): string {
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL.replace(/\/$/, "");
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) return `https://${process.env.RAILWAY_PUBLIC_DOMAIN.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
+  return `http://${host}:${port}`;
+}
+
 export function healthPayload() {
   return {
     status: "ok",
@@ -59,9 +65,10 @@ async function writeWebResponse(response: Response, res: ExpressResponse) {
   res.end(Buffer.from(await response.arrayBuffer()));
 }
 
-export function createProductHttpApp(baseUrl = process.env.PUBLIC_BASE_URL ?? "http://127.0.0.1:3000") {
+export function createProductHttpApp(baseUrl = publicBaseUrl()) {
   const app = express();
   app.disable("x-powered-by");
+  if (process.env.RAILWAY_ENVIRONMENT || process.env.MISSING_TRUST_PROXY === "1") app.set("trust proxy", 1);
   app.use(sandboxMiddleware);
 
   app.all("/mcp", async (req: ExpressRequest, res: ExpressResponse) => {
@@ -109,8 +116,8 @@ export async function serveHttp() {
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? "127.0.0.1";
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Invalid PORT: ${process.env.PORT}`);
-  const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? `http://${host}:${port}`;
-  const server = createServer(createProductHttpApp(publicBaseUrl));
+  const resolvedPublicBaseUrl = publicBaseUrl(port, host);
+  const server = createServer(createProductHttpApp(resolvedPublicBaseUrl));
 
   const close = async () => {
     await productMcpHandler.close();
@@ -123,9 +130,9 @@ export async function serveHttp() {
     server.once("error", reject);
     server.listen(port, host, resolve);
   });
-  process.stdout.write(`MISSING remote MCP listening on ${publicBaseUrl}/mcp\n`);
-  process.stdout.write(`MISSING A2A Agent Card on ${publicBaseUrl}/.well-known/agent-card.json\n`);
-  process.stdout.write(`MISSING sandbox status on ${publicBaseUrl}/sandboxz\n`);
+  process.stdout.write(`MISSING remote MCP listening on ${resolvedPublicBaseUrl}/mcp\n`);
+  process.stdout.write(`MISSING A2A Agent Card on ${resolvedPublicBaseUrl}/.well-known/agent-card.json\n`);
+  process.stdout.write(`MISSING sandbox status on ${resolvedPublicBaseUrl}/sandboxz\n`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await serveHttp();
