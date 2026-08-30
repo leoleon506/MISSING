@@ -86,11 +86,15 @@ function topLevelProjection(spec: OpenApiObject, schema: any): { projection: Rec
     return { projection: {}, required: [] };
   }
   const projection: Record<string, ProjectionRule> = {};
-  const declaredRequired = new Set(Array.isArray(resolved.required) ? resolved.required : []);
+  const declaredRequired = new Set<string>(
+    Array.isArray(resolved.required)
+      ? resolved.required.filter((field: unknown): field is string => typeof field === "string")
+      : [],
+  );
   for (const key of Object.keys(resolved.properties).sort().slice(0, 12)) {
     projection[key] = { op: "FIELD", path: key };
   }
-  const required = [...declaredRequired].filter(field => typeof field === "string" && projection[field]);
+  const required = [...declaredRequired].filter(field => projection[field]);
   if (!required.length) required.push(...Object.keys(projection).slice(0, Math.min(3, Object.keys(projection).length)));
   return { projection, required };
 }
