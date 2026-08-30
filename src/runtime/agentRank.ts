@@ -15,6 +15,7 @@ export interface AgentRankEvent {
   error: string | null;
   attempt_position: number;
   rescue: boolean;
+  source?: "routing" | "exploration";
 }
 
 export interface AgentRankEvidence {
@@ -67,6 +68,10 @@ let loadedPath: string | null | undefined;
 
 export function agentRankEnabled(): boolean {
   return process.env.MISSING_AGENTRANK_ENABLED !== "0";
+}
+
+export function agentRankExplorationEnabled(): boolean {
+  return process.env.MISSING_AGENTRANK_EXPLORATION_ENABLED === "1";
 }
 
 export function agentRankMinObservations(): number {
@@ -135,7 +140,8 @@ function validEvent(value: unknown): value is AgentRankEvent {
     && typeof event.attempt_position === "number"
     && Number.isInteger(event.attempt_position)
     && event.attempt_position >= 0
-    && typeof event.rescue === "boolean";
+    && typeof event.rescue === "boolean"
+    && (event.source === undefined || event.source === "routing" || event.source === "exploration");
 }
 
 function ensureLoaded() {
@@ -165,6 +171,7 @@ export function recordAgentRankAttempt(args: {
   attemptPosition: number;
   rescue?: boolean;
   observedAt?: string;
+  source?: "routing" | "exploration";
 }): AgentRankEvent {
   ensureLoaded();
   const event: AgentRankEvent = {
@@ -179,6 +186,7 @@ export function recordAgentRankAttempt(args: {
     error: args.attempt.error,
     attempt_position: Math.max(0, Math.trunc(args.attemptPosition)),
     rescue: Boolean(args.rescue && args.attempt.ok),
+    source: args.source ?? "routing",
   };
   acceptEvent(event);
 
@@ -269,7 +277,22 @@ export function rankRecipesForExecution(recipes: VerifiedRecipe[]): VerifiedReci
     .map(item => item.recipe);
 }
 
-export function agentRankSnapshot(recipes: VerifiedRecipe[], capability?: string): { enabled: boolean; minimum_observations: number; capabilities: Array<{ capability: string; routing_mode: "agentrank" | "registry_order"; rankings: AgentRankEntry[] }> } {
+/**
+ * Select at most one already-verified alternate for a bounded shadow probe.
+ * Exploration stops automatically once every recipe has mature evidence.
+ */
+export function selectAgentRankExplorationRecipe(recipes: VerifiedRecipe[], selectedFingerprint: string): VerifiedRecipe | null {
+  if (!agentRankEnabled() || !agentRankExplorationEnabled() || recipes.length < 2) return null;
+  const minimum = agentRankMinObservations();
+  const candidates = recipes
+    .filter(recipe => recipe.recipe_fingerprint !== selectedFingerprint)
+    .map((recipe, index) => ({ recipe, index, evidence: evidenceFor(recipe) }))
+    .filter(item => item.evidence.observations < minimum)
+    .sort((a, b) => a.evidence.observations - b.evidence.observations || a.index - b.index);
+  return candidates[0]?.recipe ?? null;
+}
+
+export function agentRankSnapshot(recipes: VerifiedRecipe[], capability?: string): { enabled: boolean; exploration_enabled: boolean; minimum_observations: number; capabilities: Array<{ capability: string; routing_mode: "agentrank" | "registry_order"; rankings: AgentRankEntry[] }> } {
   const selected = capability ? recipes.filter(recipe => recipe.capability === capability) : recipes;
   const groups = new Map<string, VerifiedRecipe[]>();
   for (const recipe of selected) groups.set(recipe.capability, [...(groups.get(recipe.capability) ?? []), recipe]);
@@ -288,7 +311,7 @@ export function agentRankSnapshot(recipes: VerifiedRecipe[], capability?: string
     };
   });
 
-  return { enabled: agentRankEnabled(), minimum_observations: agentRankMinObservations(), capabilities };
+  return { enabled: agentRankEnabled(), exploration_enabled: agentRankExplorationEnabled(), minimum_observations: agentRankMinObservations(), capabilities };
 }
 
 export function truncateAgentRankLedger() {

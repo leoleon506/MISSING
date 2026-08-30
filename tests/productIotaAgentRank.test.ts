@@ -9,6 +9,7 @@ import {
   recordAgentRankAttempt,
   reloadAgentRankFromLedger,
   resetAgentRankForTest,
+  selectAgentRankExplorationRecipe,
 } from "../src/runtime/agentRank.js";
 import { recipesForCapability } from "../src/runtime/recipes.js";
 
@@ -25,6 +26,7 @@ function useTempLedger() {
 afterEach(() => {
   delete process.env.MISSING_AGENTRANK_ENABLED;
   delete process.env.MISSING_AGENTRANK_MIN_OBSERVATIONS;
+  delete process.env.MISSING_AGENTRANK_EXPLORATION_ENABLED;
   configureAgentRankLedger(null);
   resetAgentRankForTest();
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
@@ -40,6 +42,7 @@ describe("MISSING Product Iota AgentRank", () => {
 
     const snapshot = agentRankSnapshot(recipes, "country_alpha_metadata");
     expect(snapshot.minimum_observations).toBe(2);
+    expect(snapshot.exploration_enabled).toBe(false);
     expect(snapshot.capabilities[0]?.routing_mode).toBe("registry_order");
     expect(snapshot.capabilities[0]?.rankings.every(item => item.routing_evidence === "cold_start")).toBe(true);
   });
@@ -85,6 +88,34 @@ describe("MISSING Product Iota AgentRank", () => {
     expect(snapshot.capabilities[0]?.rankings[0]?.provider).toBe("countries.dev");
     expect(snapshot.capabilities[0]?.rankings[0]?.evidence.rescue_successes).toBe(2);
     expect(snapshot.capabilities[0]?.rankings[1]?.evidence.failures).toBe(2);
+  });
+
+  it("keeps exploration off until explicitly enabled", () => {
+    useTempLedger();
+    const recipes = recipesForCapability("country_alpha_metadata");
+    const warnely = recipes.find(recipe => recipe.provider === "Warnely")!;
+    expect(selectAgentRankExplorationRecipe(recipes, warnely.recipe_fingerprint)).toBeNull();
+  });
+
+  it("selects only an under-observed verified alternate and stops at maturity", () => {
+    useTempLedger();
+    process.env.MISSING_AGENTRANK_EXPLORATION_ENABLED = "1";
+    const recipes = recipesForCapability("country_alpha_metadata");
+    const warnely = recipes.find(recipe => recipe.provider === "Warnely")!;
+    const countries = recipes.find(recipe => recipe.provider === "countries.dev")!;
+
+    expect(selectAgentRankExplorationRecipe(recipes, warnely.recipe_fingerprint)?.provider).toBe("countries.dev");
+
+    for (let i = 0; i < 2; i += 1) {
+      recordAgentRankAttempt({
+        capability: "country_alpha_metadata",
+        attempt: { provider: countries.provider, recipe_fingerprint: countries.recipe_fingerprint, url: null, ok: true, http_status: 200, latency_ms: 100, error: null },
+        attemptPosition: 0,
+        source: "exploration",
+      });
+    }
+
+    expect(selectAgentRankExplorationRecipe(recipes, warnely.recipe_fingerprint)).toBeNull();
   });
 
   it("rehydrates routing evidence from the durable ledger", () => {
