@@ -1,4 +1,5 @@
 import { rankRecipesForExecution, recordAgentRankAttempt, selectAgentRankExplorationRecipe } from "./agentRank.js";
+import { economicsEnforcementEnabled, rankRecipesByEconomics, recordEconomicsResolution } from "./economics.js";
 import { recipesForCapability } from "./recipes.js";
 import type { ResolveResult, RuntimeAttempt, RuntimeHealth, RuntimeInput, VerifiedRecipe } from "./types.js";
 
@@ -73,7 +74,7 @@ export function projectRecipeOutput(recipe: VerifiedRecipe, input: RuntimeInput,
 }
 
 /**
- * Execute exactly one recipe without touching circuit-breaker or AgentRank state.
+ * Execute exactly one recipe without touching circuit-breaker, AgentRank, or Kappa state.
  * Product Theta uses this primitive to verify supply candidates before they
  * are eligible for registration in the executable recipe registry.
  */
@@ -142,7 +143,17 @@ export async function resolveCapability(capability: string, input: RuntimeInput,
   if (!registered.length) return { status: "unavailable", capability, reason: "No replay-verified recipe is registered for this capability", attempts: [] };
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const recipes = rankRecipesForExecution(registered);
+  const agentRankOrdered = rankRecipesForExecution(registered);
+  const recipes = rankRecipesByEconomics(agentRankOrdered);
+  if (!recipes.length && economicsEnforcementEnabled()) {
+    return {
+      status: "unavailable",
+      capability,
+      reason: "No replay-verified provider satisfies the configured Kappa economics policy",
+      attempts: [],
+    };
+  }
+
   const attempts: RuntimeAttempt[] = [];
   for (const recipe of recipes) {
     if (stateFor(recipe).state === "open") continue;
@@ -152,6 +163,7 @@ export async function resolveCapability(capability: string, input: RuntimeInput,
     recordAgentRankAttempt({ capability, attempt: result.attempt, attemptPosition, rescue: attemptPosition > 0 && Boolean(result.output) });
     if (result.output) {
       markSuccess(recipe);
+      recordEconomicsResolution({ capability, recipe });
       scheduleAgentRankExploration(capability, registered, recipe, timeoutMs);
       return { status: "resolved", capability, provider: recipe.provider, recipe_fingerprint: recipe.recipe_fingerprint, output: result.output, attempts };
     }
