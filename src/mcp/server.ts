@@ -3,6 +3,7 @@ import { serveStdio as serveMcpStdio } from "@modelcontextprotocol/server/stdio"
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../config/index.js";
 import { registerOpenApiCompilerTool } from "./openApiCompiler.js";
+import { registerThetaOrchestratorTool } from "./orchestrator.js";
 import { registerProductTools } from "./product.js";
 import { executeNormalTool, fallbackEvent, missingSpecification, toolSpecifications, type InvocationRecorder } from "./tools.js";
 
@@ -13,6 +14,7 @@ export function createProductServer(): McpServer {
   const server = new McpServer({ name: "missing", version: "0.2.0" });
   registerProductTools(server);
   registerOpenApiCompilerTool(server);
+  registerThetaOrchestratorTool(server);
   return server;
 }
 
@@ -33,6 +35,7 @@ export function createBenchmarkServer(options: BenchmarkServerOptions): McpServe
   if (options.includeProductRuntime) {
     registerProductTools(server);
     registerOpenApiCompilerTool(server);
+    registerThetaOrchestratorTool(server);
   }
   return server;
 }
