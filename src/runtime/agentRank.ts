@@ -60,12 +60,18 @@ type InternalStats = {
 };
 
 const MAX_RECENT_LATENCIES = 100;
+const DEFAULT_MIN_OBSERVATIONS = 2;
 const statsByFingerprint = new Map<string, InternalStats>();
 let overridePath: string | null | undefined;
 let loadedPath: string | null | undefined;
 
 export function agentRankEnabled(): boolean {
   return process.env.MISSING_AGENTRANK_ENABLED !== "0";
+}
+
+export function agentRankMinObservations(): number {
+  const parsed = Number(process.env.MISSING_AGENTRANK_MIN_OBSERVATIONS ?? DEFAULT_MIN_OBSERVATIONS);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 1000 ? parsed : DEFAULT_MIN_OBSERVATIONS;
 }
 
 export function agentRankLedgerPath(): string | null {
@@ -247,25 +253,31 @@ function scoreRecipe(recipe: VerifiedRecipe): Omit<AgentRankEntry, "rank"> {
   };
 }
 
+function evidenceMature(entries: Array<{ entry: Omit<AgentRankEntry, "rank"> }>): boolean {
+  const minimum = agentRankMinObservations();
+  return entries.every(item => item.entry.evidence.observations >= minimum);
+}
+
 export function rankRecipesForExecution(recipes: VerifiedRecipe[]): VerifiedRecipe[] {
   if (!agentRankEnabled() || recipes.length < 2) return [...recipes];
   const scored = recipes.map((recipe, index) => ({ recipe, index, entry: scoreRecipe(recipe) }));
-  // Cold start is deliberately conservative: preserve the registry's established provider order.
-  if (scored.every(item => item.entry.evidence.observations === 0)) return [...recipes];
+  // Do not let one noisy request overturn the established provider order. Every
+  // candidate must have enough comparable runtime evidence before reranking.
+  if (!evidenceMature(scored)) return [...recipes];
   return scored
     .sort((a, b) => b.entry.score - a.entry.score || a.index - b.index)
     .map(item => item.recipe);
 }
 
-export function agentRankSnapshot(recipes: VerifiedRecipe[], capability?: string): { enabled: boolean; capabilities: Array<{ capability: string; routing_mode: "agentrank" | "registry_order"; rankings: AgentRankEntry[] }> } {
+export function agentRankSnapshot(recipes: VerifiedRecipe[], capability?: string): { enabled: boolean; minimum_observations: number; capabilities: Array<{ capability: string; routing_mode: "agentrank" | "registry_order"; rankings: AgentRankEntry[] }> } {
   const selected = capability ? recipes.filter(recipe => recipe.capability === capability) : recipes;
   const groups = new Map<string, VerifiedRecipe[]>();
   for (const recipe of selected) groups.set(recipe.capability, [...(groups.get(recipe.capability) ?? []), recipe]);
 
   const capabilities = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, items]) => {
     const scored = items.map((recipe, index) => ({ index, entry: scoreRecipe(recipe) }));
-    const hasEvidence = scored.some(item => item.entry.evidence.observations > 0);
-    const routingMode = agentRankEnabled() && hasEvidence && items.length > 1 ? "agentrank" as const : "registry_order" as const;
+    const mature = evidenceMature(scored);
+    const routingMode = agentRankEnabled() && mature && items.length > 1 ? "agentrank" as const : "registry_order" as const;
     const ordered = routingMode === "agentrank"
       ? scored.sort((a, b) => b.entry.score - a.entry.score || a.index - b.index)
       : scored;
@@ -276,7 +288,7 @@ export function agentRankSnapshot(recipes: VerifiedRecipe[], capability?: string
     };
   });
 
-  return { enabled: agentRankEnabled(), capabilities };
+  return { enabled: agentRankEnabled(), minimum_observations: agentRankMinObservations(), capabilities };
 }
 
 export function truncateAgentRankLedger() {
