@@ -6,6 +6,7 @@ import { mountA2A } from "../a2a/server.js";
 import { supplyAcquisitionEnabled } from "../runtime/acquisition.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
 import { openApiCompilerEnabled } from "../runtime/openApiCompiler.js";
+import { thetaOrchestratorEnabled } from "../runtime/orchestrator.js";
 import { providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
@@ -33,6 +34,7 @@ export function healthPayload() {
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
+    theta_orchestrator_enabled: thetaOrchestratorEnabled(),
     sandbox: sandboxConfig().enabled,
   };
 }
@@ -55,6 +57,7 @@ export function readinessPayload(baseUrl: string) {
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
+    theta_orchestrator_enabled: thetaOrchestratorEnabled(),
   };
 }
 
