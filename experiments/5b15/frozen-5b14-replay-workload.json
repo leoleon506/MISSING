@@ -1,0 +1,481 @@
+{
+  "experiment": "5B15",
+  "source_run_id": 33283645154,
+  "source_head_sha": "b2a3289c6929233eb2ac56f706ad8b8eb6413100",
+  "source_report_fingerprint": "ba1ed1e8aa6152568734096a39396bc43d46de1d0290d1b40ec901d5dba27e43",
+  "recipes": [
+    {
+      "family": "geography",
+      "case_id": "country_alpha_metadata",
+      "provider_candidate_id": "r2045_5d53d45e3f",
+      "provider_name": "Warnely",
+      "recipe_fingerprint": "2397865423586696accd6acb37c134ff1d9b60c107807a8f34449646e51f89e3",
+      "contract": {
+        "case_id": "country_alpha_metadata",
+        "provider_candidate_id": "r2045_5d53d45e3f",
+        "decision": "COMPILE",
+        "method": "GET",
+        "base_url": "https://www.warnely.com",
+        "path_template": "/api/v1/countries/{iso}",
+        "path_bindings": {
+          "iso": "$input.country_code"
+        },
+        "query_bindings": {},
+        "evidence_ids": [
+          "r2045_5d53d45e3f-e01",
+          "r2045_5d53d45e3f-4w02",
+          "r2045_5d53d45e3f-lc01"
+        ],
+        "reason": "4S_LINKED_CONTRACT_GROUNDED:req4w_cd4f17807d2790f2"
+      },
+      "projection": {
+        "country_code": {
+          "op": "INPUT",
+          "name": "country_code"
+        },
+        "region": {
+          "op": "FIELD",
+          "path": "country.region"
+        },
+        "country_name": {
+          "op": "FIELD",
+          "path": "country.name"
+        }
+      },
+      "changed_input": {
+        "country_code": "JP"
+      },
+      "required": [
+        "country_code",
+        "country_name",
+        "region"
+      ],
+      "documentary_witness_5b12": null,
+      "request_utility_5b14": {
+        "rank": 1,
+        "hypothesis_id": "req4w_cd4f17807d2790f2",
+        "request_fingerprint": "ab2da3047a08e083b9bff4dcf61c924441f8833593d781834ee164a74cd53838",
+        "output_coverage": 800,
+        "output_roles_supported": 2,
+        "binding_score": 100,
+        "task_score": 40,
+        "structured_evidence": 4,
+        "complexity": 14,
+        "base_score": 15150,
+        "documentary": false,
+        "request_local_span_found": true,
+        "request_local_span_bytes": 1891,
+        "binding_unresolved": 0,
+        "binding_invalid_refs": 0,
+        "binding_provenance_bonus_uses": 0,
+        "candidate_class": "native"
+      }
+    },
+    {
+      "family": "games",
+      "case_id": "pokemon_name_metadata",
+      "provider_candidate_id": "r2011_cc56c440e8",
+      "provider_name": "Pokéapi",
+      "recipe_fingerprint": "58d31019de84fbab3272073797ae5d26f925ec7c15c95c262dbe59d22b3d31e5",
+      "contract": {
+        "case_id": "pokemon_name_metadata",
+        "provider_candidate_id": "r2011_cc56c440e8",
+        "decision": "COMPILE",
+        "method": "GET",
+        "base_url": "https://pokeapi.co",
+        "path_template": "/api/v2/pokemon/{pokemon_name}",
+        "path_bindings": {
+          "pokemon_name": "$input.pokemon_name"
+        },
+        "query_bindings": {},
+        "evidence_ids": [
+          "r2011_cc56c440e8-e01"
+        ],
+        "reason": "4S_LINKED_CONTRACT_GROUNDED:req4n_2ae6fff9ae3c51c1"
+      },
+      "projection": {
+        "name": {
+          "op": "INPUT",
+          "name": "pokemon_name"
+        },
+        "id": {
+          "op": "FIELD",
+          "path": "id"
+        },
+        "height": {
+          "op": "FIELD",
+          "path": "height"
+        }
+      },
+      "changed_input": {
+        "pokemon_name": "bulbasaur"
+      },
+      "required": [
+        "name",
+        "id",
+        "height"
+      ],
+      "documentary_witness_5b12": null,
+      "request_utility_5b14": {
+        "rank": 1,
+        "hypothesis_id": "req4n_2ae6fff9ae3c51c1",
+        "request_fingerprint": "aa7e4a54c49f7440da3148d10e8e59cfbc9ccf362f4df95139e869c0a082ec2a",
+        "output_coverage": 0,
+        "output_roles_supported": 0,
+        "binding_score": 100,
+        "task_score": 40,
+        "structured_evidence": 1,
+        "complexity": 14,
+        "base_score": 1320,
+        "documentary": false,
+        "request_local_span_found": true,
+        "request_local_span_bytes": 2139,
+        "binding_unresolved": 0,
+        "binding_invalid_refs": 0,
+        "binding_provenance_bonus_uses": 0,
+        "candidate_class": "other"
+      }
+    },
+    {
+      "family": "language",
+      "case_id": "english_word_definition_metadata",
+      "provider_candidate_id": "r2004_70bd486794",
+      "provider_name": "Free Dictionary",
+      "recipe_fingerprint": "7b189b058b32370070f9b2a92f0b19316b6a996d790084dc18e3da5e3d0499ab",
+      "contract": {
+        "case_id": "english_word_definition_metadata",
+        "provider_candidate_id": "r2004_70bd486794",
+        "decision": "COMPILE",
+        "method": "GET",
+        "base_url": "https://api.dictionaryapi.dev",
+        "path_template": "/api/v2/entries/en/{word}",
+        "path_bindings": {
+          "word": "$input.word"
+        },
+        "query_bindings": {},
+        "evidence_ids": [
+          "r2004_70bd486794-e01"
+        ],
+        "reason": "4S_LINKED_CONTRACT_GROUNDED:req4j_4877ac1e7d48301a"
+      },
+      "projection": {
+        "word": {
+          "op": "INPUT",
+          "name": "word"
+        },
+        "definition": {
+          "op": "FIELD",
+          "path": "0.meanings.0.definitions.0.definition"
+        }
+      },
+      "changed_input": {
+        "word": "world"
+      },
+      "required": [
+        "word",
+        "definition"
+      ],
+      "documentary_witness_5b12": null,
+      "request_utility_5b14": {
+        "rank": 1,
+        "hypothesis_id": "req4j_4877ac1e7d48301a",
+        "request_fingerprint": "0d5b4505353aac0c97e57b8071d8ceb9f628e36f1253f14c1234ae7019d2daca",
+        "output_coverage": 250,
+        "output_roles_supported": 2,
+        "binding_score": 100,
+        "task_score": 100,
+        "structured_evidence": 0,
+        "complexity": 15,
+        "base_score": 1075,
+        "documentary": false,
+        "request_local_span_found": true,
+        "request_local_span_bytes": 2126,
+        "binding_unresolved": 0,
+        "binding_invalid_refs": 0,
+        "binding_provenance_bonus_uses": 0,
+        "candidate_class": "other"
+      }
+    },
+    {
+      "family": "games",
+      "case_id": "chess_player_metadata",
+      "provider_candidate_id": "r2001_f4b3457189",
+      "provider_name": "Chess.com",
+      "recipe_fingerprint": "81f530d8501eb9b06f36a2eda1240fc597336257b3f94bc32d0464b8bed47f56",
+      "contract": {
+        "case_id": "chess_player_metadata",
+        "provider_candidate_id": "r2001_f4b3457189",
+        "decision": "COMPILE",
+        "method": "GET",
+        "base_url": "https://api.chess.com",
+        "path_template": "/pub/player/{username}",
+        "path_bindings": {
+          "username": "$input.username"
+        },
+        "query_bindings": {},
+        "evidence_ids": [
+          "colcap_8191fc502722f8cb",
+          "sec_409b0dd790ab107dbc"
+        ],
+        "reason": "4S_LINKED_CONTRACT_GROUNDED:req_0a8b93c65f5fd683"
+      },
+      "projection": {
+        "username": {
+          "op": "INPUT",
+          "name": "username"
+        },
+        "title": {
+          "op": "FIELD",
+          "path": "title"
+        }
+      },
+      "changed_input": {
+        "username": "hikaru"
+      },
+      "required": [
+        "username",
+        "title"
+      ],
+      "documentary_witness_5b12": null,
+      "request_utility_5b14": {
+        "rank": 1,
+        "hypothesis_id": "req_0a8b93c65f5fd683",
+        "request_fingerprint": "8b18eee14498b540d29537724329b72aaa9da6bdfd12cff6540b81ec02991d9e",
+        "output_coverage": 250,
+        "output_roles_supported": 2,
+        "binding_score": 100,
+        "task_score": 80,
+        "structured_evidence": 1,
+        "complexity": 13,
+        "base_score": 80,
+        "documentary": false,
+        "request_local_span_found": true,
+        "request_local_span_bytes": 1535,
+        "binding_unresolved": 0,
+        "binding_invalid_refs": 0,
+        "binding_provenance_bonus_uses": 0,
+        "candidate_class": "collection"
+      }
+    },
+    {
+      "family": "media",
+      "case_id": "television_show_metadata",
+      "provider_candidate_id": "r2016_7cbffced6f",
+      "provider_name": "TVMaze",
+      "recipe_fingerprint": "c9a3689afc5f27d5962d81fcb83d281da715134ac179e9b91da7e68138178b10",
+      "contract": {
+        "case_id": "television_show_metadata",
+        "provider_candidate_id": "r2016_7cbffced6f",
+        "decision": "COMPILE",
+        "method": "GET",
+        "base_url": "https://api.tvmaze.com",
+        "path_template": "/search/shows?q=girls",
+        "path_bindings": {},
+        "query_bindings": {
+          "q": "$input.show_name"
+        },
+        "evidence_ids": [
+          "r2016_7cbffced6f-e05"
+        ],
+        "reason": "4S_LINKED_CONTRACT_GROUNDED:doc12_af70b0e1dc774e55"
+      },
+      "projection": {
+        "name": {
+          "op": "INPUT",
+          "name": "show_name"
+        },
+        "premiered": {
+          "op": "FIELD",
+          "path": "0.show.premiered"
+        },
+        "id": {
+          "op": "FIELD",
+          "path": "0.show.id"
+        }
+      },
+      "changed_input": {
+        "show_name": "Severance"
+      },
+      "required": [
+        "name",
+        "id",
+        "premiered"
+      ],
+      "documentary_witness_5b12": {
+        "template_fingerprint": "11d27a25957a6e7363ddbdd226473aeb26eb668eb4692bb14dd532185cd7ed66",
+        "source_evidence_id": "r2016_7cbffced6f-e05",
+        "source_body_fingerprint": "697b7180721a82758b40158e4748364816419c3766d1600c9ca04780c1f699c1",
+        "source_request_fingerprint": "e8a2a93424ed1d3c6f0f39456dd2498e4a77ed90f6a71b5295b8ac40bea80017",
+        "source_span_fingerprint": "ef9a274619545f6ca593a3f519a705d1b059c1103f865b45c36f0922dc00d948",
+        "candidate_id": "doc12_af70b0e1dc774e55",
+        "method": "GET",
+        "origin": "https://api.tvmaze.com",
+        "fixed_path_fingerprint": "cc5f1789acdcc5a3bd4db385286ba360b177ad1877615a2d0342f6cda36c3c44",
+        "query_key_set_fingerprint": "ecdcb213e02a9c3c73f2c376e58590249d30e1db6af461f1f97a9bf0d327e512",
+        "fixed_query_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "variable_slots": [
+          {
+            "id": "d12_d34f63e477001d",
+            "name": "q",
+            "in": "query",
+            "input": "show_name",
+            "documented_token": "girls",
+            "example_value": "girls"
+          }
+        ],
+        "ranking_bonus": false,
+        "beam_position": 2,
+        "request_fingerprint": "1b61f324c6c52d7cb26ec79fb02cb9cdd398e3c4ea49602d1a2ffbdfc64df1db",
+        "rendered_build_url": "https://api.tvmaze.com/search/shows?q=Breaking+Bad"
+      },
+      "request_utility_5b14": {
+        "rank": 2,
+        "hypothesis_id": "doc12_af70b0e1dc774e55",
+        "request_fingerprint": "1b61f324c6c52d7cb26ec79fb02cb9cdd398e3c4ea49602d1a2ffbdfc64df1db",
+        "output_coverage": 0,
+        "output_roles_supported": 0,
+        "binding_score": 100,
+        "task_score": 60,
+        "structured_evidence": 1,
+        "complexity": 12,
+        "base_score": 90,
+        "documentary": true,
+        "request_local_span_found": true,
+        "request_local_span_bytes": 2143,
+        "binding_unresolved": 0,
+        "binding_invalid_refs": 0,
+        "binding_provenance_bonus_uses": 0,
+        "candidate_class": "documentary"
+      }
+    },
+    {
+      "family": "space",
+      "case_id": "satellite_catalog_metadata",
+      "provider_candidate_id": "r2001_53b1e84db0",
+      "provider_name": "OrbitalWiki",
+      "recipe_fingerprint": "0d49092610279785e94b576b31be901219519e3c4e5b95bc024e6af1002362ce",
+      "contract": {
+        "case_id": "satellite_catalog_metadata",
+        "provider_candidate_id": "r2001_53b1e84db0",
+        "decision": "COMPILE",
+        "method": "GET",
+        "base_url": "https://www.orbitalwiki.com",
+        "path_template": "/api/v1/satellites/{norad_catalog_id}",
+        "path_bindings": {
+          "norad_catalog_id": "$input.norad_catalog_id"
+        },
+        "query_bindings": {},
+        "evidence_ids": [
+          "4e_ref_0b3caeb285ca9472"
+        ],
+        "reason": "4S_LINKED_CONTRACT_GROUNDED:req4j_8e71ba7ae227feb8"
+      },
+      "projection": {
+        "norad_catalog_id": {
+          "op": "INPUT",
+          "name": "norad_catalog_id"
+        },
+        "name": {
+          "op": "FIELD",
+          "path": "data.name"
+        }
+      },
+      "changed_input": {
+        "norad_catalog_id": 20580
+      },
+      "required": [
+        "norad_catalog_id",
+        "name"
+      ],
+      "documentary_witness_5b12": null,
+      "request_utility_5b14": {
+        "rank": 1,
+        "hypothesis_id": "req4j_8e71ba7ae227feb8",
+        "request_fingerprint": "91a06815b4ae80157a728eb6fd787dbe8f54f5acd0d6659d0cd6b593eda3cadb",
+        "output_coverage": 150,
+        "output_roles_supported": 1,
+        "binding_score": 100,
+        "task_score": 80,
+        "structured_evidence": 2,
+        "complexity": 14,
+        "base_score": 1105,
+        "documentary": false,
+        "request_local_span_found": true,
+        "request_local_span_bytes": 2139,
+        "binding_unresolved": 0,
+        "binding_invalid_refs": 0,
+        "binding_provenance_bonus_uses": 0,
+        "candidate_class": "other"
+      }
+    },
+    {
+      "family": "network",
+      "case_id": "ip_geolocation_metadata",
+      "provider_candidate_id": "r2005_55752742db",
+      "provider_name": "ipwhois",
+      "recipe_fingerprint": "3b3d8e080a59f5f341c4faf6f035b5336343c16af162424854bdb3017f64bfb6",
+      "contract": {
+        "case_id": "ip_geolocation_metadata",
+        "provider_candidate_id": "r2005_55752742db",
+        "decision": "COMPILE",
+        "method": "GET",
+        "base_url": "https://ipwho.is",
+        "path_template": "/{ip_address}",
+        "path_bindings": {
+          "ip_address": "$input.ip_address"
+        },
+        "query_bindings": {},
+        "evidence_ids": [
+          "r2005_55752742db-e07",
+          "r2005_55752742db-e01",
+          "r2005_55752742db-e08"
+        ],
+        "reason": "4S_LINKED_CONTRACT_GROUNDED:req4l_13b330c6074d52d2"
+      },
+      "projection": {
+        "ip_address": {
+          "op": "INPUT",
+          "name": "ip_address"
+        },
+        "country_code": {
+          "op": "FIELD",
+          "path": "country_code"
+        },
+        "country_name": {
+          "op": "FIELD",
+          "path": "country"
+        }
+      },
+      "changed_input": {
+        "ip_address": "1.1.1.1"
+      },
+      "required": [
+        "ip_address",
+        "country_code",
+        "country_name"
+      ],
+      "documentary_witness_5b12": null,
+      "request_utility_5b14": {
+        "rank": 1,
+        "hypothesis_id": "req4l_13b330c6074d52d2",
+        "request_fingerprint": "e8f53ece26c781d1959eec488e1ee1935f4fb5455416f90692aa9f1762175ef9",
+        "output_coverage": 150,
+        "output_roles_supported": 1,
+        "binding_score": 100,
+        "task_score": 80,
+        "structured_evidence": 2,
+        "complexity": 11,
+        "base_score": 822,
+        "documentary": false,
+        "request_local_span_found": true,
+        "request_local_span_bytes": 1694,
+        "binding_unresolved": 0,
+        "binding_invalid_refs": 0,
+        "binding_provenance_bonus_uses": 0,
+        "candidate_class": "other"
+      }
+    }
+  ],
+  "recipe_fingerprint_set_fingerprint": "05ea0e575d00da1a5846df2d6efa78515796a688bfecf86f85a9175f180911c7",
+  "changed_input_workload_fingerprint": "562e0a754b29e72a9077a79eecf59bb9988628bbaf2c0256857882fd17b0b857"
+}
