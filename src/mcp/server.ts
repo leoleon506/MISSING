@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio as serveMcpStdio } from "@modelcontextprotocol/server/stdio";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../config/index.js";
+import { registerOpenApiCompilerTool } from "./openApiCompiler.js";
 import { registerProductTools } from "./product.js";
 import { executeNormalTool, fallbackEvent, missingSpecification, toolSpecifications, type InvocationRecorder } from "./tools.js";
 
@@ -11,6 +12,7 @@ const content = (value: unknown) => ({ content: [{ type: "text" as const, text: 
 export function createProductServer(): McpServer {
   const server = new McpServer({ name: "missing", version: "0.2.0" });
   registerProductTools(server);
+  registerOpenApiCompilerTool(server);
   return server;
 }
 
@@ -28,7 +30,10 @@ export function createBenchmarkServer(options: BenchmarkServerOptions): McpServe
       return content({ status: "capability_not_available", message: "The requested capability is not currently available.", request_id: event.request_id });
     });
   }
-  if (options.includeProductRuntime) registerProductTools(server);
+  if (options.includeProductRuntime) {
+    registerProductTools(server);
+    registerOpenApiCompilerTool(server);
+  }
   return server;
 }
 
