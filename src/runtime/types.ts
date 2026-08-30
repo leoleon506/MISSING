@@ -4,6 +4,22 @@ export type ProjectionRule =
   | { op: "INPUT"; name: string }
   | { op: "FIELD"; path: string };
 
+export type RecipeVerification =
+  | {
+      status: "replay_verified";
+      source: "experiment";
+      source_experiment: "5B14";
+      resilience_experiment: "5B15";
+      source_run_id: number;
+    }
+  | {
+      status: "replay_verified";
+      source: "product_live";
+      verification_inputs: RuntimeInput[];
+      verified_at: string;
+      evidence_url: string;
+    };
+
 export interface VerifiedRecipe {
   capability: string;
   family: string;
@@ -18,12 +34,7 @@ export interface VerifiedRecipe {
   projection: Record<string, ProjectionRule>;
   required: string[];
   example_input: RuntimeInput;
-  verification: {
-    status: "replay_verified";
-    source_experiment: "5B14";
-    resilience_experiment: "5B15";
-    source_run_id: number;
-  };
+  verification: RecipeVerification;
 }
 
 export interface RuntimeAttempt {
