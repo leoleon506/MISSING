@@ -1,3 +1,4 @@
+import { A2A_PROTOCOL_VERSION } from "@a2a-js/sdk";
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resetDemand } from "../src/runtime/discovery.js";
@@ -45,7 +46,7 @@ async function sendMessage(text: string) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "A2A-Version": "1.0.0",
+      "A2A-Version": A2A_PROTOCOL_VERSION,
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
