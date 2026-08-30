@@ -1,0 +1,29 @@
+name: Run MISSING Experiment 5B17
+
+on:
+  workflow_dispatch:
+
+jobs:
+  experiment-5b17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Run 5B17 capability-equivalent provider retrieval benchmark
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-4.1-mini-2025-04-14
+        run: node --import tsx src/experiment5b17.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: missing-experiment-5b17-results
+          path: results/experiment-5b17/*.json
