@@ -3,6 +3,7 @@ import express, { type Request as ExpressRequest, type Response as ExpressRespon
 import { createServer, type IncomingMessage } from "node:http";
 import { pathToFileURL } from "node:url";
 import { mountA2A } from "../a2a/server.js";
+import { supplyAcquisitionEnabled } from "../runtime/acquisition.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
@@ -27,6 +28,7 @@ export function healthPayload() {
     transports: ["mcp-streamable-http", "a2a-jsonrpc"],
     demand_persistence: demandLedgerPath() !== null,
     supply_persistence: supplyLedgerPath() !== null,
+    supply_acquisition_enabled: supplyAcquisitionEnabled(),
     sandbox: sandboxConfig().enabled,
   };
 }
@@ -46,6 +48,7 @@ export function readinessPayload(baseUrl: string) {
     public_url_valid,
     demand_persistence,
     supply_persistence,
+    supply_acquisition_enabled: supplyAcquisitionEnabled(),
   };
 }
 
