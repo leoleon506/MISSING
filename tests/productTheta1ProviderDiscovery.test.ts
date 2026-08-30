@@ -30,6 +30,14 @@ function directoryResponse(status = 200) {
       preferred: "1.0",
       versions: { "1.0": { info: { title: "Azure Reservation", description: "Private reservation management" }, swaggerUrl: "https://specs.example/reservation.json" } },
     },
+    "hetzner.example": {
+      preferred: "1.0",
+      versions: { "1.0": { info: { title: "Hetzner Cloud API", description: "Cloud servers and pricing information including VAT" }, swaggerUrl: "https://specs.example/hetzner.json" } },
+    },
+    "generic-tax.example": {
+      preferred: "1.0",
+      versions: { "1.0": { info: { title: "Generic Tax Service", description: "Finnish VAT identifiers and tax metadata" }, swaggerUrl: "https://specs.example/generic-tax.json" } },
+    },
     "finnish-vat.example": {
       preferred: "2.0",
       versions: {
@@ -59,7 +67,6 @@ describe("MISSING Product Theta.1 provider discovery", () => {
 
   it("ranks structured OpenAPI directory candidates against unresolved demand", async () => {
     const candidates = await discoverProviderCandidates(opportunity, { fetchFn: fakeFetch, limit: 5 });
-    expect(candidates).toHaveLength(1);
     const first = candidates[0] as ProviderDiscoveryCandidate;
     expect(first.directory_id).toBe("finnish-vat.example");
     expect(first.provider).toBe("Finnish VAT Validation API");
@@ -73,6 +80,19 @@ describe("MISSING Product Theta.1 provider discovery", () => {
   it("does not match VAT as a substring of reservation or private", async () => {
     const candidates = await discoverProviderCandidates(opportunity, { fetchFn: fakeFetch, limit: 10 });
     expect(candidates.some(candidate => candidate.provider === "Azure Reservation")).toBe(false);
+  });
+
+  it("rejects a provider when a single demand term appears only in descriptive pricing text", async () => {
+    const candidates = await discoverProviderCandidates(opportunity, { fetchFn: fakeFetch, limit: 10 });
+    expect(candidates.some(candidate => candidate.provider === "Hetzner Cloud API")).toBe(false);
+  });
+
+  it("allows a generic provider when its description has at least two complete demand terms", async () => {
+    const candidates = await discoverProviderCandidates(opportunity, { fetchFn: fakeFetch, limit: 10 });
+    const generic = candidates.find(candidate => candidate.provider === "Generic Tax Service");
+    expect(generic).toBeDefined();
+    expect(generic?.matched_terms).toContain("finnish");
+    expect(generic?.matched_terms).toContain("vat");
   });
 
   it("uses the durable demand ranking as the automatic discovery queue", async () => {

@@ -73,15 +73,25 @@ function scoreCandidate(directoryId: string, version: APIsGuruVersion, opportuni
   const queryTerms = tokens(`${opportunity.normalized_intent} ${opportunity.requested_capability ?? ""}`);
   const title = version.info?.title ?? directoryId;
   const description = version.info?.description ?? "";
-  const allTokens = tokenSet(`${directoryId} ${title} ${description}`);
   const titleTokens = tokenSet(title);
   const idTokens = tokenSet(directoryId);
+  const descriptionTokens = tokenSet(description);
+  const identityTokens = new Set([...titleTokens, ...idTokens]);
+  const allTokens = new Set([...identityTokens, ...descriptionTokens]);
   const matched = queryTerms.filter(term => allTokens.has(term));
+  const identityMatches = matched.filter(term => identityTokens.has(term));
+  const descriptionOnlyMatches = matched.filter(term => !identityTokens.has(term) && descriptionTokens.has(term));
+  const relevant = identityMatches.length > 0 || descriptionOnlyMatches.length >= 2;
   const coverage = queryTerms.length ? matched.length / queryTerms.length : 0;
   const titleMatches = matched.filter(term => titleTokens.has(term)).length;
   const idMatches = matched.filter(term => idTokens.has(term)).length;
-  const score = coverage * 0.7 + Math.min(titleMatches, 3) * 0.08 + Math.min(idMatches, 2) * 0.03;
-  return { score: Number(Math.min(1, score).toFixed(4)), matchedTerms: matched };
+  const score = relevant
+    ? coverage * 0.7 + Math.min(titleMatches, 3) * 0.08 + Math.min(idMatches, 2) * 0.03
+    : 0;
+  return {
+    score: Number(Math.min(1, score).toFixed(4)),
+    matchedTerms: relevant ? matched : [],
+  };
 }
 
 export async function discoverProviderCandidates(
@@ -91,7 +101,7 @@ export async function discoverProviderCandidates(
   const fetchFn = options.fetchFn ?? fetch;
   const directoryUrl = options.directoryUrl ?? providerDirectoryUrl();
   const response = await fetchFn(directoryUrl, {
-    headers: { accept: "application/json", "user-agent": "MISSING-Theta6/0.2" },
+    headers: { accept: "application/json", "user-agent": "MISSING-Theta7/0.2" },
   });
   if (!response.ok) throw new Error(`Provider directory request failed with HTTP ${response.status}`);
   const payload = await response.json() as unknown;
