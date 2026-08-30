@@ -1,0 +1,32 @@
+name: Run MISSING Experiment 5B20
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  experiment-5b20:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Run 5B20 strict request-local typed qualification benchmark
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-4.1-mini-2025-04-14
+        run: node --import tsx src/experiment5b20.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: missing-experiment-5b20-results
+          path: results/experiment-5b20
+          if-no-files-found: error

@@ -1,0 +1,260 @@
+# Experiment 5B20 — Strict Request-Local Typed Qualification
+
+## Status
+Preregistered before workload materialization and before treatment implementation.
+
+## Product north star
+MISSING remains a fallback capability resolver for AI agents:
+
+`capability intent -> equivalent provider -> trustworthy executable request -> verified recipe -> replayable alternate -> runtime continuity -> paid rescue/failover`
+
+5B20 tests only the request-qualification layer. Revenue remains a downstream, non-gating commercial hypothesis.
+
+## Frozen base and consumed evidence
+- Repository base SHA: `849a6504d73aa141903490c0cb1a35a3a2b95d9c`
+- Consumed 5B19 workflow run: `33290703105`
+- Consumed 5B19 merge SHA: `849a6504d73aa141903490c0cb1a35a3a2b95d9c`
+- Consumed 5B19 formal decision: `REASSESS_5B19_EVIDENCE_QUALIFIED_EXECUTABLE_REQUEST_INDUCTION`
+- Consumed 5B19 report fingerprint: `4c48ec82abd4da4998574b565a8c21e603f66d6181e45f137170319d49bdb172`
+- Consumed 5B19 engine fingerprint: `adc3c7b13f76c90cf9e5f6c7819dde43b963cb4e165a0ef0ae7673fe58db1609`
+- Consumed 5B19 artifact ID: `9725882150`
+- Consumed 5B19 artifact digest: `sha256:39f191f6f2b50ab410a51f75423b44ec264713acad7143a28ca237081b6fb773`
+- Frozen workload fingerprint: `c1c58704416e27de80348868d7bde518bfc4696ef05faa187616c05f89f2b3bb`
+- Frozen Public APIs snapshot: `public-apis/public-apis@988c57be4616cc9507fd3e8c34adedba5387f079`
+
+No holdout evidence is consumed.
+
+## What 5B19 established
+5B19 kept the exact 21 frozen providers, fixed 4+4 acquisition budget, unchanged compiler/verifier/replay, and produced:
+- 153 raw request hypotheses;
+- 15 admitted hypotheses;
+- 114 rejected for insufficient provenance;
+- 24 rejected for weak binding;
+- 0 URL-presence-only admissions;
+- 0 broad-identity-only admissions;
+- 0 ranking-bonus uses;
+- 0 beam entries without qualification witnesses;
+- 0 probed requests without qualification witnesses;
+- 0 qualifying alternate recipes.
+
+However, post-run inspection showed that the implementation used broad source-evidence text for input-binding qualification instead of exclusively parameter-local evidence. That implementation detail materially differs from the preregistered 5B19 requirement that semantic/generic parameter anchors be local to the same operation/parameter evidence. Examples observed after the run included an image-optimization request whose generic `q` slot was associated with an IP-address task, and a generic country-search `q` request associated with a country-code task. These observations motivate 5B20; 5B19 remains frozen and will not be rerun.
+
+## Experimental unit
+Exactly the same 21 provider identities used by 5B18 and 5B19, preserving:
+- capability/case ID and semantic family;
+- primary recipe fingerprint and unhealthy-after-5B15 flag;
+- frozen candidate ID and selected position;
+- catalog identity;
+- frozen equivalence claim and supported role sets;
+- historical 5B17 status.
+
+The exact workload is materialized in a separate second commit after this preregistration and before treatment implementation.
+
+## Primary hypothesis
+For the same 21 provider identities and the same evidence acquired under the unchanged 4 ordinary + 4 reserved-recovery policy, enforcing **strict request-local operation provenance and typed parameter-local binding evidence** will eliminate off-local semantic contamination and static/navigation request false positives while preserving legitimate requests sufficiently well to manufacture replayable alternate recipes.
+
+## Treatment boundary
+5B20 changes only the qualification of request hypotheses after inherited request-hypothesis construction/localization and before the unchanged 5B14 global request ranking.
+
+It does **not** change:
+- provider identities or ordering;
+- catalog identity resolution;
+- provider retrieval/equivalence ranking;
+- 4+4 acquisition policy or total network budget;
+- public-network safety controls;
+- OpenAPI/Postman parsing behavior;
+- request beam size;
+- live probe transport behavior;
+- compiler/projection/response grounding;
+- development semantic verifier;
+- double-live verification;
+- changed-input replay;
+- holdout policy.
+
+The 5B20 gate is filtering-only. It contributes no ranking bonus and does not reorder survivors.
+
+## Treatment: strict request-local typed qualification
+
+### 1. Deterministic request-local capsule
+Every non-machine-contract documentary/query request must derive a deterministic capsule from the **same source evidence containing the exact normalized route occurrence**.
+
+Capsule construction is frozen as:
+- locate an exact normalized route occurrence, allowing documented path placeholders to match one non-separator segment;
+- select the first qualifying occurrence in deterministic evidence-ID / byte-offset order;
+- include at most **400 characters before** the route occurrence and **600 characters after** it;
+- include the normalized method/route/slot metadata generated by the hypothesis itself;
+- do not include any text outside that capsule in binding qualification.
+
+For a generic query parameter, a second parameter-local subwindow is derived from the selected request-local capsule:
+- locate the selected query-key occurrence belonging to the route/query representation;
+- include at most **220 characters before** and **320 characters after** that parameter occurrence;
+- if no parameter occurrence exists in the request-local capsule, reject the generic binding.
+
+Machine contracts and structured request collections use only their structured operation-local proof/capsule fields. Executed structured traces use only their frozen request geometry plus trace-local lineage already admitted by inherited trace safety checks. No full-document semantic text may be introduced into binding qualification.
+
+### 2. Static/navigation geometry gate
+Before semantic binding qualification, reject a request generically if its request geometry is clearly non-API/static/navigation, including:
+- static-file extensions in the request path: `.js`, `.mjs`, `.css`, `.map`, images, fonts, media, archives, PDFs;
+- static/navigation path families such as `/assets`, `/static`, `/images`, `/img`, `/icons`, `/fonts`, `/scripts`, `/_next/static`, `/_next/image`, `/login`, `/signin`, `/signup`, `/register`, `/privacy`, `/terms`, `/careers`, `/blog`, `/news`;
+- image/static optimization requests whose query contains an asset URL/path and image-sizing/quality parameters;
+- non-HTTP schemes or auth-like query parameters remain rejected under inherited controls.
+
+This rule is generic. No provider, host, endpoint, case, family, build value, replay value, or expected-answer literal may appear in it.
+
+### 3. Strong lexical binding
+A non-generic slot is admissible when the input role and slot name have direct distinctive lexical overlap after normalization. This evidence is request-local by construction because the slot is part of the exact admitted route/operation.
+
+### 4. Typed semantic-role binding
+If there is no direct distinctive lexical overlap, a non-generic slot may bind only when:
+- input role and slot role are the exact same non-generic semantic role; and
+- the **parameter-local structured/capsule evidence** contains the input's typed signature.
+
+The typed signature is derived mechanically from the input name, not from case/provider literals:
+- tokenize the input name;
+- discard only pure query/navigation glue tokens (`q`, `query`, `search`, `term`, `input`, `value`, `param`, `parameter`);
+- preserve semantic type tokens such as `country`, `code`, `ip`, `address`, `word`, `username`, `catalog`, `id`, `name`;
+- when two or more typed tokens remain, at least two distinct typed tokens must occur locally; when one remains, that token must occur locally.
+
+Broad identity-like compatibility is forbidden.
+
+### 5. Generic-query binding requires dual typed locality
+For a generic query slot (`q`, `query`, `search`, `term`, `s`, `value`, `input`) the parameter-local subwindow must contain **both**:
+
+A. typed input evidence:
+- at least the threshold above from the mechanically derived typed signature; and
+
+B. distinctive task/entity evidence:
+- at least one distinctive non-input token mechanically derived from the capability intent.
+
+The entire source document cannot satisfy either requirement. Only the frozen parameter-local subwindow may do so.
+
+### 6. Provenance classes
+The same four high-level provenance classes remain permitted:
+1. qualified machine contract;
+2. structured request collection;
+3. executed structured trace;
+4. documented local HTTP example.
+
+For documented local HTTP examples, method and exact route must be evidenced in the selected request-local capsule. Plain href presence remains insufficient.
+
+### 7. No ranking side effect
+Every admitted witness emits `ranking_bonus:false`. Qualification cannot change a surviving hypothesis score or order.
+
+## Required witnesses
+Every admitted request must emit:
+- hypothesis/candidate ID;
+- provenance class;
+- exact source evidence ID/body fingerprint;
+- request-local capsule byte range and fingerprint, or structured-operation proof fingerprint;
+- parameter-local byte range/fingerprint when used;
+- slot/input pair;
+- binding class (`lexical`, `typed_semantic_local`, `generic_query_typed_local`);
+- typed input signature and matched local tokens;
+- distinctive task anchors and matched local tokens for generic queries;
+- static/navigation geometry decision;
+- qualification fingerprint;
+- `ranking_bonus:false`.
+
+## Required instrumentation
+The formal report must expose at least:
+- exact workload fingerprint and 21 frozen identities/order;
+- unchanged acquisition and selection counters;
+- raw/admitted/rejected request counts;
+- reject counts by strong-provenance, static/navigation geometry, off-local binding, typed-local mismatch, generic-query typed-local mismatch;
+- admitted counts by provenance/binding class;
+- request-local capsule count/bytes/fingerprints;
+- parameter-local capsule count/bytes/fingerprints;
+- **full-document binding context uses**;
+- **off-local anchor admissions**;
+- **static/navigation request admissions**;
+- **generic query admissions without typed local input evidence**;
+- **generic query admissions without local distinctive task evidence**;
+- qualification nondeterminism violations;
+- qualification ranking-bonus uses;
+- beam/probe entries without qualification witnesses;
+- live probes and terminal stages;
+- recipes/double-build/replay evidence;
+- replay discovery/cognitive/qualification deltas;
+- hardcoding counts;
+- holdout accesses and LLM cost.
+
+## Frozen acquisition and execution budgets
+Identical to 5B19:
+- capabilities: exactly 7;
+- provider identities: exactly 21;
+- catalog identity-resolution fetches: exactly 1;
+- broad provider retrieval calls: 0;
+- capability-equivalence reranker calls: 0;
+- secondary provider reranker calls: 0;
+- new/manual provider selection: 0;
+- ordinary acquisition fetches: max 4/provider;
+- reserved recovery fetches: max 4/provider;
+- total acquisition fetches: max 8/provider;
+- documentation depth: max 2;
+- body/document size: unchanged 4 MiB;
+- global request beam: unchanged maximum 2/provider attempt;
+- persisted alternates: maximum 1/capability;
+- build verification: exactly 2 successful live executions required;
+- changed-input replay: exactly 1 successful replay required;
+- holdout accesses: 0;
+- total LLM cost: <= USD 3.00;
+- mean LLM cost per qualifying alternate: <= USD 0.20 when at least one alternate qualifies.
+
+## GO criteria
+Every criterion is required:
+1. integrity/preregistration checks pass;
+2. exact frozen workload fingerprint matches;
+3. exactly 7 frozen capabilities and 21 frozen provider identities are represented;
+4. Public APIs snapshot is exactly `988c57be4616cc9507fd3e8c34adedba5387f079`;
+5. catalog identity-resolution fetches = 1;
+6. all attempts use only the frozen providers in frozen order;
+7. broad provider retrieval, equivalence reranking, secondary reranking, new selection, and manual substitution = 0;
+8. ordinary acquisition <=4/provider, reserved recovery <=4/provider, total <=8/provider;
+9. ordinary-reserve borrowing and total-budget violations = 0;
+10. recovery and qualification nondeterminism violations = 0;
+11. full-document binding-context uses = 0;
+12. off-local anchor admissions = 0;
+13. static/navigation request admissions = 0;
+14. generic-query admissions without typed local input evidence = 0;
+15. generic-query admissions without local distinctive task evidence = 0;
+16. every beam request has a qualification witness;
+17. every live-probed request has a qualification witness;
+18. qualification ranking-bonus uses = 0;
+19. at least 2 capabilities obtain qualifying alternate recipes;
+20. qualifying alternates span at least 2 semantic families;
+21. every persistently unhealthy frozen primary obtains a qualifying alternate recipe;
+22. every alternate is on a registrable domain independent from its primary;
+23. every alternate has two successful live build verifications;
+24. every alternate passes changed-input replay;
+25. replay catalog/retrieval/reranker/documentation/synthesis/recovery/qualification deltas = 0;
+26. auth-like rendered requests = 0;
+27. wrong-task probes = 0;
+28. runtime provider URL/name hardcoding count = 0;
+29. runtime case/family hardcoding count = 0;
+30. total LLM cost <= USD 3.00;
+31. if alternates >0, mean LLM cost/alternate <= USD 0.20;
+32. holdout accesses = 0.
+
+If every criterion passes:
+
+`GO_5B20_STRICT_REQUEST_LOCAL_TYPED_QUALIFICATION`
+
+Otherwise:
+
+`REASSESS_5B20_STRICT_REQUEST_LOCAL_TYPED_QUALIFICATION`
+
+A GO would establish that strict request-local typed evidence is sufficient to convert at least part of the frozen equivalent-provider supply into replayable alternates. It would not itself establish runtime failover economics or generalization to unseen capabilities.
+
+## Prohibitions
+- no rerun or reinterpretation of 5B19;
+- no provider retrieval widening;
+- no new provider/endpoint seeds;
+- no manual substitutions;
+- no provider/host/endpoint/case/family/build-value/replay-value/expected-answer-specific rules;
+- no increase to acquisition budgets or request beam;
+- no full-document text for binding qualification;
+- no qualification ranking bonus;
+- no semantic-verifier relaxation;
+- no counting 2xx/build-only success as an alternate;
+- no post-hoc GO reinterpretation;
+- no holdout access.
