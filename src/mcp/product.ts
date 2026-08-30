@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { demandSnapshot, recordDemand, searchCapabilities } from "../runtime/discovery.js";
+import { demandSnapshot, demandSummary, recordDemand, searchCapabilities } from "../runtime/discovery.js";
 import { resolveCapability, runtimeHealth } from "../runtime/executor.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 
@@ -21,17 +21,17 @@ export function registerProductTools(server: McpServer) {
   }, async args => content({ query: args.query, matches: searchCapabilities(args.query, args.limit ?? 5) }));
 
   server.registerTool("record_missing_capability_demand", {
-    description: "Record an external capability that an agent needs but MISSING cannot currently resolve. This records demand only and never invents or claims an unverified integration.",
+    description: "Record an external capability that an agent needs but MISSING cannot currently resolve. Demand is persisted when the demand ledger is enabled; this never invents or claims an unverified integration.",
     inputSchema: z.object({
       intent: z.string().min(2).describe("Natural-language description of the missing capability"),
       capability: z.string().optional().describe("Optional proposed capability identifier when already known"),
     }),
-  }, async args => content({ recorded: recordDemand(args.intent, args.capability ?? null) }));
+  }, async args => content({ recorded: recordDemand(args.intent, args.capability ?? null, "mcp") }));
 
   server.registerTool("missing_demand_snapshot", {
-    description: "Return process-local unresolved capability demand observed by MISSING, ordered by repeated demand.",
+    description: "Return unresolved capability demand observed by MISSING, ordered by repeated demand and reconstructed from the durable demand ledger when configured.",
     inputSchema: z.object({}),
-  }, async () => content({ demand: demandSnapshot() }));
+  }, async () => content({ demand: demandSnapshot(), summary: demandSummary() }));
 
   server.registerTool("resolve_capability", {
     description: "Execute a capability using only a replay-verified provider recipe. Returns unavailable rather than inventing an unverified integration.",

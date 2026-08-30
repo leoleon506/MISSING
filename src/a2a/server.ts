@@ -69,7 +69,7 @@ export class MissingA2AExecutor implements AgentExecutor {
       return;
     }
 
-    const recorded = recordDemand(text);
+    const recorded = recordDemand(text, null, "a2a");
     eventBus.publish(AgentEvent.message(responseMessage(requestContext, {
       status: "capability_unavailable",
       demand_recorded: true,

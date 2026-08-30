@@ -1,3 +1,4 @@
+import { appendDemandEvent, readDemandEvents, truncateDemandLedger, type DemandSource } from "./demandLedger.js";
 import { VERIFIED_RECIPES } from "./recipes.js";
 
 export interface DemandObservation {
@@ -7,6 +8,8 @@ export interface DemandObservation {
   count: number;
   first_seen_at: string;
   last_seen_at: string;
+  sources: Record<string, number>;
+  examples: string[];
 }
 
 export interface CapabilitySearchResult {
@@ -20,6 +23,7 @@ export interface CapabilitySearchResult {
 }
 
 const demand = new Map<string, DemandObservation>();
+let hydrated = false;
 
 const STOPWORDS = new Set([
   "a", "an", "and", "api", "can", "for", "find", "get", "i", "in", "is", "me", "my", "of", "or", "service", "the", "this", "to", "tool", "using", "with",
@@ -43,41 +47,98 @@ export function normalizeIntent(value: string): string {
     .replace(/\s+/g, " ");
 }
 
+function demandKey(normalized: string, capability: string | null) {
+  return `${capability ?? "unknown"}::${normalized}`;
+}
+
+function applyDemandEvent(event: {
+  intent: string;
+  normalized_intent: string;
+  capability: string | null;
+  observed_at: string;
+  source: DemandSource;
+}) {
+  const key = demandKey(event.normalized_intent, event.capability);
+  const existing = demand.get(key);
+  if (existing) {
+    existing.count += 1;
+    if (event.observed_at < existing.first_seen_at) existing.first_seen_at = event.observed_at;
+    if (event.observed_at > existing.last_seen_at) existing.last_seen_at = event.observed_at;
+    existing.sources[event.source] = (existing.sources[event.source] ?? 0) + 1;
+    if (!existing.examples.includes(event.intent) && existing.examples.length < 5) existing.examples.push(event.intent);
+    return existing;
+  }
+  const created: DemandObservation = {
+    intent: event.intent,
+    normalized_intent: event.normalized_intent,
+    capability: event.capability,
+    count: 1,
+    first_seen_at: event.observed_at,
+    last_seen_at: event.observed_at,
+    sources: { [event.source]: 1 },
+    examples: [event.intent],
+  };
+  demand.set(key, created);
+  return created;
+}
+
+function ensureHydrated() {
+  if (hydrated) return;
+  for (const event of readDemandEvents()) applyDemandEvent(event);
+  hydrated = true;
+}
+
 function terms(value: string): string[] {
   return [...new Set(normalizeIntent(value).split(" ").filter(token => token.length > 1 && !STOPWORDS.has(token)))];
 }
 
-export function recordDemand(intent: string, capability: string | null = null): DemandObservation {
+export function recordDemand(intent: string, capability: string | null = null, source: DemandSource = "unknown"): DemandObservation {
+  ensureHydrated();
   const normalized = normalizeIntent(intent);
   if (!normalized) throw new Error("intent must contain searchable text");
-  const key = `${capability ?? "unknown"}::${normalized}`;
   const now = new Date().toISOString();
-  const existing = demand.get(key);
-  if (existing) {
-    existing.count += 1;
-    existing.last_seen_at = now;
-    return { ...existing };
-  }
-  const created: DemandObservation = {
+  const event = {
+    version: 1 as const,
+    observed_at: now,
     intent,
     normalized_intent: normalized,
     capability,
-    count: 1,
-    first_seen_at: now,
-    last_seen_at: now,
+    source,
   };
-  demand.set(key, created);
-  return { ...created };
+  appendDemandEvent(event);
+  return structuredClone(applyDemandEvent(event));
 }
 
 export function demandSnapshot(): DemandObservation[] {
+  ensureHydrated();
   return [...demand.values()]
-    .map(item => ({ ...item }))
+    .map(item => structuredClone(item))
     .sort((a, b) => b.count - a.count || b.last_seen_at.localeCompare(a.last_seen_at));
 }
 
-export function resetDemand() {
+export function demandSummary() {
+  const rows = demandSnapshot();
+  return {
+    unique_intents: rows.length,
+    total_observations: rows.reduce((sum, item) => sum + item.count, 0),
+    top_demand: rows.slice(0, 10),
+    sources: rows.reduce<Record<string, number>>((acc, item) => {
+      for (const [source, count] of Object.entries(item.sources)) acc[source] = (acc[source] ?? 0) + count;
+      return acc;
+    }, {}),
+  };
+}
+
+export function reloadDemandFromLedger() {
   demand.clear();
+  hydrated = false;
+  ensureHydrated();
+}
+
+export function resetDemand(options: { truncateLedger?: boolean } = {}) {
+  demand.clear();
+  hydrated = true;
+  if (options.truncateLedger) truncateDemandLedger();
 }
 
 export function searchCapabilities(query: string, limit = 5): CapabilitySearchResult[] {
