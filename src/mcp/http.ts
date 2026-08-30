@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { pathToFileURL } from "node:url";
 import { mountA2A } from "../a2a/server.js";
 import { supplyAcquisitionEnabled } from "../runtime/acquisition.js";
+import { agentRankEnabled, agentRankLedgerPath } from "../runtime/agentRank.js";
 import { authorizeControlPlane, controlPlaneCycleOptions, controlPlaneEnabled } from "../runtime/controlPlane.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
 import { openApiCompilerEnabled } from "../runtime/openApiCompiler.js";
@@ -32,6 +33,8 @@ export function healthPayload() {
     transports: ["mcp-streamable-http", "a2a-jsonrpc"],
     demand_persistence: demandLedgerPath() !== null,
     supply_persistence: supplyLedgerPath() !== null,
+    agentrank_enabled: agentRankEnabled(),
+    agentrank_persistence: agentRankLedgerPath() !== null,
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
@@ -51,11 +54,14 @@ export function readinessPayload(baseUrl: string) {
   }
   const demand_persistence = demandLedgerPath() !== null;
   const supply_persistence = supplyLedgerPath() !== null;
+  const agentrank_persistence = agentRankLedgerPath() !== null;
   return {
-    status: public_url_valid && demand_persistence && supply_persistence ? "ready" : "not_ready",
+    status: public_url_valid && demand_persistence && supply_persistence && agentrank_persistence ? "ready" : "not_ready",
     public_url_valid,
     demand_persistence,
     supply_persistence,
+    agentrank_enabled: agentRankEnabled(),
+    agentrank_persistence,
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
