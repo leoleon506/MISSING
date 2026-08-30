@@ -1,6 +1,7 @@
 import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, type SupplyOpportunity } from "./acquisition.js";
 import { compileOpenApiLead, type OpenApiCompileResult } from "./openApiCompiler.js";
 import { discoverProviderCandidates, type ProviderDiscoveryCandidate } from "./providerDiscovery.js";
+import { isSupplyIntentBlocked, recordSupplyBlock } from "./supplyBlockLedger.js";
 
 export type Theta4Status = "promoted" | "rejected" | "needs_evidence" | "needs_provider_setup" | "no_candidates";
 
@@ -37,11 +38,13 @@ export async function runThetaOrchestrator(options: {
   compileFn?: CompileFn;
   acquireFn?: AcquireFn;
 } = {}): Promise<Theta4Result> {
-  const opportunity = rankSupplyOpportunities(1)[0] ?? null;
+  const ranked = rankSupplyOpportunities(50);
+  const opportunity = ranked.find(item => !isSupplyIntentBlocked(item.normalized_intent)) ?? null;
   const trace: Theta4TraceStep[] = [];
   if (!opportunity) {
-    trace.push({ stage: "opportunity", status: "none", detail: "No unresolved demand is currently ranked" });
-    return { status: "no_candidates", opportunity: null, selected_provider: null, recipe_fingerprint: null, trace, reason: "No unresolved demand opportunity is available" };
+    const detail = ranked.length ? "All ranked unresolved demand is temporarily blocked by supply backoff" : "No unresolved demand is currently ranked";
+    trace.push({ stage: "opportunity", status: ranked.length ? "blocked" : "none", detail });
+    return { status: "no_candidates", opportunity: null, selected_provider: null, recipe_fingerprint: null, trace, reason: detail };
   }
   trace.push({ stage: "opportunity", status: "selected", detail: opportunity.normalized_intent });
 
@@ -63,6 +66,8 @@ export async function runThetaOrchestrator(options: {
   const acquireFn = options.acquireFn ?? acquireVerifiedSupplyCandidate;
   let sawNeedsEvidence = false;
   let providerSetupReason: string | null = null;
+  let providerSetupLead: ProviderDiscoveryCandidate | null = null;
+  let providerSetupResult: OpenApiCompileResult | null = null;
   let lastRejection: string | null = null;
 
   for (const lead of leads) {
@@ -85,7 +90,11 @@ export async function runThetaOrchestrator(options: {
     });
 
     if (compiled.status === "needs_provider_setup") {
-      providerSetupReason ??= compiled.reason ?? "Relevant provider requires setup before automatic verification";
+      if (!providerSetupReason) {
+        providerSetupReason = compiled.reason ?? "Relevant provider requires setup before automatic verification";
+        providerSetupLead = lead;
+        providerSetupResult = compiled;
+      }
       continue;
     }
     if (compiled.status === "needs_verification_inputs") {
@@ -128,7 +137,17 @@ export async function runThetaOrchestrator(options: {
     return { status: "needs_evidence", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: "At least one provider lead compiled but lacked two evidence-backed verification inputs" };
   }
   if (providerSetupReason) {
-    return { status: "needs_provider_setup", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: providerSetupReason };
+    const readiness = providerSetupResult?.provider_readiness;
+    const block = recordSupplyBlock({
+      normalized_intent: opportunity.normalized_intent,
+      intent: opportunity.intent,
+      provider: providerSetupLead?.provider ?? null,
+      reason: providerSetupReason,
+      credentials_required: readiness?.credentials_required ?? [],
+      response_schema_missing: readiness?.response_schema_missing ?? false,
+    });
+    trace.push({ stage: "opportunity", status: "backoff_recorded", provider: providerSetupLead?.provider, detail: block.retry_after });
+    return { status: "needs_provider_setup", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: `${providerSetupReason} Retry after ${block.retry_after}.` };
   }
   return { status: "rejected", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: lastRejection ?? "All discovered provider candidates were rejected" };
 }
