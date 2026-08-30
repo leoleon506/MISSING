@@ -6,20 +6,12 @@ import type { ProjectionRule, RuntimeInput } from "./types.js";
 import { harvestVerificationInputs, type VerificationInputEvidence } from "./verificationInputHarvest.js";
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-
 type OpenApiObject = Record<string, any>;
 
 export interface OpenApiCompileResult {
   status: "candidate_ready" | "needs_verification_inputs" | "unsupported";
   lead: ProviderDiscoveryCandidate;
-  operation: {
-    method: "GET";
-    path: string;
-    operation_id: string | null;
-    summary: string;
-    score: number;
-    matched_terms: string[];
-  } | null;
+  operation: { method: "GET"; path: string; operation_id: string | null; summary: string; score: number; matched_terms: string[] } | null;
   candidate: SupplyCandidate | null;
   verification_input_evidence: VerificationInputEvidence[];
   missing: string[];
@@ -39,6 +31,10 @@ function tokens(text: string): string[] {
   return [...new Set(text.toLowerCase().match(/[a-z0-9]{2,}/g) ?? [])].filter(token => !STOP_WORDS.has(token));
 }
 
+function tokenSet(text: string): Set<string> {
+  return new Set(tokens(text));
+}
+
 function slug(value: string, fallback: string): string {
   const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").replace(/^[^a-z]+/, "");
   return normalized || fallback;
@@ -49,9 +45,7 @@ function resolveRef(spec: OpenApiObject, value: any): any {
   const ref = value.$ref as string;
   if (!ref.startsWith("#/")) return value;
   let current: any = spec;
-  for (const part of ref.slice(2).split("/")) {
-    current = current?.[part.replace(/~1/g, "/").replace(/~0/g, "~")];
-  }
+  for (const part of ref.slice(2).split("/")) current = current?.[part.replace(/~1/g, "/").replace(/~0/g, "~")];
   return current ?? value;
 }
 
@@ -84,18 +78,10 @@ function responseSchema(spec: OpenApiObject, operation: any): any {
 
 function topLevelProjection(spec: OpenApiObject, schema: any): { projection: Record<string, ProjectionRule>; required: string[] } {
   const resolved = resolveRef(spec, schema);
-  if (!resolved || resolved.type !== "object" || !resolved.properties || typeof resolved.properties !== "object") {
-    return { projection: {}, required: [] };
-  }
+  if (!resolved || resolved.type !== "object" || !resolved.properties || typeof resolved.properties !== "object") return { projection: {}, required: [] };
   const projection: Record<string, ProjectionRule> = {};
-  const declaredRequired = new Set<string>(
-    Array.isArray(resolved.required)
-      ? resolved.required.filter((field: unknown): field is string => typeof field === "string")
-      : [],
-  );
-  for (const key of Object.keys(resolved.properties).sort().slice(0, 12)) {
-    projection[key] = { op: "FIELD", path: key };
-  }
+  const declaredRequired = new Set<string>(Array.isArray(resolved.required) ? resolved.required.filter((field: unknown): field is string => typeof field === "string") : []);
+  for (const key of Object.keys(resolved.properties).sort().slice(0, 12)) projection[key] = { op: "FIELD", path: key };
   const required = [...declaredRequired].filter(field => projection[field]);
   if (!required.length) required.push(...Object.keys(projection).slice(0, Math.min(3, Object.keys(projection).length)));
   return { projection, required };
@@ -108,11 +94,15 @@ function operationParameters(spec: OpenApiObject, pathItem: any, operation: any)
 
 function operationScore(path: string, operation: any, lead: ProviderDiscoveryCandidate) {
   const query = tokens(`${lead.normalized_intent} ${lead.matched_terms.join(" ")}`);
-  const summary = [operation?.operationId, operation?.summary, operation?.description, path, ...(operation?.tags ?? [])].filter(Boolean).join(" ").toLowerCase();
-  const matched = query.filter(term => summary.includes(term));
+  const operationId = String(operation?.operationId ?? "");
+  const summaryText = [operationId, operation?.summary, operation?.description, path, ...(operation?.tags ?? [])].filter(Boolean).join(" ");
+  const summaryTokens = tokenSet(summaryText);
+  const operationIdTokens = tokenSet(operationId);
+  const pathTokens = tokenSet(path);
+  const matched = query.filter(term => summaryTokens.has(term));
   const coverage = query.length ? matched.length / query.length : 0;
-  const operationIdBonus = matched.filter(term => String(operation?.operationId ?? "").toLowerCase().includes(term)).length * 0.08;
-  const pathBonus = matched.filter(term => path.toLowerCase().includes(term)).length * 0.05;
+  const operationIdBonus = matched.filter(term => operationIdTokens.has(term)).length * 0.08;
+  const pathBonus = matched.filter(term => pathTokens.has(term)).length * 0.05;
   return { score: Number(Math.min(1, coverage * 0.8 + operationIdBonus + pathBonus).toFixed(4)), matched };
 }
 
@@ -149,21 +139,16 @@ function candidateId(lead: ProviderDiscoveryCandidate, path: string): string {
   return `theta2_${hash}`;
 }
 
-export async function compileOpenApiLead(
-  lead: ProviderDiscoveryCandidate,
-  options: {
-    fetchFn?: FetchLike;
-    verificationInputs?: RuntimeInput[];
-    capability?: string;
-    family?: string;
-  } = {},
-): Promise<OpenApiCompileResult> {
+export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, options: { fetchFn?: FetchLike; verificationInputs?: RuntimeInput[]; capability?: string; family?: string } = {}): Promise<OpenApiCompileResult> {
   const fetchFn = options.fetchFn ?? fetch;
-  const response = await fetchFn(lead.spec_url, { headers: { accept: "application/json, application/yaml, text/yaml, */*", "user-agent": "MISSING-Theta3/0.2" } });
+  const response = await fetchFn(lead.spec_url, { headers: { accept: "application/json, application/yaml, text/yaml, */*", "user-agent": "MISSING-Theta6/0.2" } });
   if (!response.ok) throw new Error(`OpenAPI spec request failed with HTTP ${response.status}`);
   const spec = parseSpec(await response.text());
   const selected = selectOperation(spec, lead);
   if (!selected) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], missing: ["get_operation"], reason: "No GET operation was found in the OpenAPI document" };
+  if (selected.score <= 0 || selected.matched.length === 0) {
+    return { status: "unsupported", lead, operation: { method: "GET", path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched }, candidate: null, verification_input_evidence: [], missing: ["relevant_get_operation"], reason: "No GET operation has semantic overlap with the unresolved demand" };
+  }
 
   const base_url = baseUrlFor(spec, selected.operation);
   if (!base_url) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], missing: ["https_base_url"], reason: "Could not derive a static HTTPS base URL" };
@@ -171,48 +156,23 @@ export async function compileOpenApiLead(
   const { path_bindings, query_bindings, parameters } = deriveBindings(spec, selected.pathItem, selected.operation);
   const { projection, required } = topLevelProjection(spec, responseSchema(spec, selected.operation));
   if (!Object.keys(projection).length) {
-    return {
-      status: "unsupported",
-      lead,
-      operation: { method: "GET", path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched },
-      candidate: null,
-      verification_input_evidence: [],
-      missing: ["object_response_projection"],
-      reason: "The selected operation does not expose a simple top-level JSON object schema that Theta can project deterministically",
-    };
+    return { status: "unsupported", lead, operation: { method: "GET", path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched }, candidate: null, verification_input_evidence: [], missing: ["object_response_projection"], reason: "The selected operation does not expose a simple top-level JSON object schema that Theta can project deterministically" };
   }
 
   const harvested = options.verificationInputs === undefined ? harvestVerificationInputs(parameters) : null;
   const verification_inputs = options.verificationInputs ?? harvested?.inputs ?? [];
   const capability = options.capability ?? `${slug(lead.normalized_intent, "discovered")}_capability`;
   const candidate: SupplyCandidate = {
-    candidate_id: candidateId(lead, selected.path),
-    demand_intent: lead.demand_intent,
-    capability,
-    family: options.family ?? "discovered",
-    provider: lead.provider,
-    evidence_url: lead.spec_url,
-    method: "GET",
-    base_url,
-    path_template: selected.path,
-    path_bindings,
-    query_bindings,
-    projection,
-    required,
-    verification_inputs,
+    candidate_id: candidateId(lead, selected.path), demand_intent: lead.demand_intent, capability, family: options.family ?? "discovered", provider: lead.provider,
+    evidence_url: lead.spec_url, method: "GET", base_url, path_template: selected.path, path_bindings, query_bindings, projection, required, verification_inputs,
   };
 
   const missing: string[] = [];
   if (verification_inputs.length < 2) missing.push("verification_inputs");
   return {
-    status: missing.length ? "needs_verification_inputs" : "candidate_ready",
-    lead,
+    status: missing.length ? "needs_verification_inputs" : "candidate_ready", lead,
     operation: { method: "GET", path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched },
-    candidate,
-    verification_input_evidence: harvested?.evidence ?? [],
-    missing,
-    reason: missing.length
-      ? "Theta requires two independent replay inputs grounded in explicit caller data or OpenAPI examples, enum values, or defaults; MISSING will not invent them"
-      : null,
+    candidate, verification_input_evidence: harvested?.evidence ?? [], missing,
+    reason: missing.length ? "Theta requires two independent replay inputs grounded in explicit caller data or OpenAPI examples, enum values, or defaults; MISSING will not invent them" : null,
   };
 }
