@@ -66,7 +66,7 @@ describe("Product Iota.1 safe provider exploration", () => {
     expect(backup?.evidence.successes).toBe(1);
   });
 
-  it("stops shadow traffic once the alternate reaches the evidence threshold", async () => {
+  it("stops shadow traffic once the alternate reaches the evidence threshold while allowing mature AgentRank routing", async () => {
     setupLedger();
     process.env.MISSING_AGENTRANK_EXPLORATION_ENABLED = "1";
     process.env.MISSING_AGENTRANK_MIN_OBSERVATIONS = "2";
@@ -78,8 +78,11 @@ describe("Product Iota.1 safe provider exploration", () => {
       if (url.includes("warnely.com")) {
         return new Response(JSON.stringify({ country: { name: "United States", region: "North America" } }), { status: 200 });
       }
-      if (url.includes("countries.dev")) {
+      if (url.includes("countries.dev/alpha/JP")) {
         return new Response(JSON.stringify({ name: "Japan", alpha2Code: "JP", region: "Asia" }), { status: 200 });
+      }
+      if (url.includes("countries.dev/alpha/US")) {
+        return new Response(JSON.stringify({ name: "United States", alpha2Code: "US", region: "North America" }), { status: 200 });
       }
       throw new Error(`Unexpected URL ${url}`);
     }));
@@ -88,11 +91,21 @@ describe("Product Iota.1 safe provider exploration", () => {
     await flushExploration();
     await resolveCapability("country_alpha_metadata", { country_code: "US" });
     await flushExploration();
-    const probesAfterMaturity = seen.filter(url => url.includes("countries.dev")).length;
-    expect(probesAfterMaturity).toBe(2);
 
-    await resolveCapability("country_alpha_metadata", { country_code: "US" });
+    const shadowProbesAfterMaturity = seen.filter(url => url.includes("countries.dev/alpha/JP")).length;
+    expect(shadowProbesAfterMaturity).toBe(2);
+
+    const snapshot = agentRankSnapshot(recipesForCapability("country_alpha_metadata"), "country_alpha_metadata");
+    expect(snapshot.capabilities[0]?.routing_mode).toBe("agentrank");
+
+    const third = await resolveCapability("country_alpha_metadata", { country_code: "US" });
     await flushExploration();
-    expect(seen.filter(url => url.includes("countries.dev")).length).toBe(2);
+    expect(third.status).toBe("resolved");
+
+    // No extra shadow example-input probe is allowed after both providers reach
+    // the minimum evidence threshold. A later countries.dev /US call is normal
+    // AgentRank routing, not exploration.
+    expect(seen.filter(url => url.includes("countries.dev/alpha/JP")).length).toBe(2);
+    expect(seen.some(url => url.includes("countries.dev/alpha/US"))).toBe(true);
   });
 });
