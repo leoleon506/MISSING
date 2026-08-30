@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { configureDemandLedger } from "../src/runtime/demandLedger.js";
 import { resetSandboxState } from "../src/runtime/sandbox.js";
-import { createProductHttpApp } from "../src/mcp/http.js";
+import { createProductHttpApp, publicBaseUrl } from "../src/mcp/http.js";
 
 let server: Server | null = null;
 let baseUrl = "";
@@ -27,6 +27,10 @@ afterEach(async () => {
   delete process.env.MISSING_SANDBOX_ENABLED;
   delete process.env.MISSING_SANDBOX_REQUESTS_PER_WINDOW;
   delete process.env.MISSING_SANDBOX_WINDOW_MS;
+  delete process.env.PUBLIC_BASE_URL;
+  delete process.env.RAILWAY_PUBLIC_DOMAIN;
+  delete process.env.RAILWAY_ENVIRONMENT;
+  delete process.env.MISSING_TRUST_PROXY;
   configureDemandLedger(null);
   resetSandboxState();
   if (server) await new Promise<void>(resolve => server?.close(() => resolve()));
@@ -62,5 +66,16 @@ describe("MISSING Product Eta public agent sandbox", () => {
     expect((await fetch(`${baseUrl}/.well-known/agent-card.json`)).status).toBe(200);
     expect((await fetch(`${baseUrl}/.well-known/agent-card.json`)).status).toBe(200);
     expect((await fetch(`${baseUrl}/.well-known/agent-card.json`)).status).toBe(200);
+  });
+
+  it("derives the public HTTPS origin from Railway without manual PUBLIC_BASE_URL", () => {
+    process.env.RAILWAY_PUBLIC_DOMAIN = "missing-production.up.railway.app";
+    expect(publicBaseUrl()).toBe("https://missing-production.up.railway.app");
+  });
+
+  it("lets explicit PUBLIC_BASE_URL override the provider domain", () => {
+    process.env.RAILWAY_PUBLIC_DOMAIN = "missing-production.up.railway.app";
+    process.env.PUBLIC_BASE_URL = "https://missing.example/";
+    expect(publicBaseUrl()).toBe("https://missing.example");
   });
 });
