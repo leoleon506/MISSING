@@ -115,12 +115,13 @@ function markFailure(recipe: VerifiedRecipe) {
 }
 
 function scheduleAgentRankExploration(capability: string, registered: VerifiedRecipe[], selectedRecipe: VerifiedRecipe, timeoutMs: number) {
-  const explorationRecipe = selectAgentRankExplorationRecipe(registered, selectedRecipe.recipe_fingerprint);
+  const explorationPool = economicsEnforcementEnabled() ? rankRecipesByEconomics(registered) : registered;
+  const explorationRecipe = selectAgentRankExplorationRecipe(explorationPool, selectedRecipe.recipe_fingerprint);
   if (!explorationRecipe || explorationInFlight.has(explorationRecipe.recipe_fingerprint)) return;
   explorationInFlight.add(explorationRecipe.recipe_fingerprint);
 
-  // Privacy boundary: shadow probes use only the recipe's already-verified example input.
-  // User inputs and outputs are never copied to an alternate provider for exploration.
+  // Privacy + economics boundary: shadow probes use only verified example input
+  // and, when Kappa enforcement is active, only economically eligible providers.
   void attemptRecipe(explorationRecipe, explorationRecipe.example_input, timeoutMs)
     .then(result => {
       recordAgentRankAttempt({
