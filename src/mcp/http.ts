@@ -3,6 +3,7 @@ import express, { type Request as ExpressRequest, type Response as ExpressRespon
 import { createServer, type IncomingMessage } from "node:http";
 import { pathToFileURL } from "node:url";
 import { mountA2A } from "../a2a/server.js";
+import { demandLedgerPath } from "../runtime/demandLedger.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { createProductServer } from "./server.js";
 
@@ -16,6 +17,7 @@ export function healthPayload() {
     capability_count: new Set(VERIFIED_RECIPES.map(recipe => recipe.capability)).size,
     recipe_count: VERIFIED_RECIPES.length,
     transports: ["mcp-streamable-http", "a2a-jsonrpc"],
+    demand_persistence: demandLedgerPath() !== null,
   };
 }
 
