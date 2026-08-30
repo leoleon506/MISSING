@@ -6,7 +6,9 @@ afterEach(() => { vi.unstubAllGlobals(); resetRuntimeHealth(); });
 
 describe("MISSING product alpha runtime", () => {
   it("seeds only replay-verified healthy recipes", () => {
-    expect(VERIFIED_RECIPES).toHaveLength(6);
+    expect(VERIFIED_RECIPES).toHaveLength(7);
+    expect(new Set(VERIFIED_RECIPES.map(r => r.capability)).size).toBe(6);
+    expect(VERIFIED_RECIPES.filter(r => r.capability === "country_alpha_metadata")).toHaveLength(2);
     expect(VERIFIED_RECIPES.some(r => r.capability === "english_word_definition_metadata")).toBe(false);
     expect(VERIFIED_RECIPES.every(r => r.verification.status === "replay_verified")).toBe(true);
   });
