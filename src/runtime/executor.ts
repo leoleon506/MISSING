@@ -1,3 +1,4 @@
+import { rankRecipesForExecution, recordAgentRankAttempt } from "./agentRank.js";
 import { recipesForCapability } from "./recipes.js";
 import type { ResolveResult, RuntimeAttempt, RuntimeHealth, RuntimeInput, VerifiedRecipe } from "./types.js";
 
@@ -71,7 +72,7 @@ export function projectRecipeOutput(recipe: VerifiedRecipe, input: RuntimeInput,
 }
 
 /**
- * Execute exactly one recipe without touching circuit-breaker state.
+ * Execute exactly one recipe without touching circuit-breaker or AgentRank state.
  * Product Theta uses this primitive to verify supply candidates before they
  * are eligible for registration in the executable recipe registry.
  */
@@ -112,14 +113,17 @@ function markFailure(recipe: VerifiedRecipe) {
 }
 
 export async function resolveCapability(capability: string, input: RuntimeInput, options: { timeoutMs?: number } = {}): Promise<ResolveResult> {
-  const recipes = recipesForCapability(capability);
-  if (!recipes.length) return { status: "unavailable", capability, reason: "No replay-verified recipe is registered for this capability", attempts: [] };
+  const registered = recipesForCapability(capability);
+  if (!registered.length) return { status: "unavailable", capability, reason: "No replay-verified recipe is registered for this capability", attempts: [] };
 
+  const recipes = rankRecipesForExecution(registered);
   const attempts: RuntimeAttempt[] = [];
   for (const recipe of recipes) {
     if (stateFor(recipe).state === "open") continue;
     const result = await attemptRecipe(recipe, input, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const attemptPosition = attempts.length;
     attempts.push(result.attempt);
+    recordAgentRankAttempt({ capability, attempt: result.attempt, attemptPosition, rescue: attemptPosition > 0 && Boolean(result.output) });
     if (result.output) {
       markSuccess(recipe);
       return { status: "resolved", capability, provider: recipe.provider, recipe_fingerprint: recipe.recipe_fingerprint, output: result.output, attempts };
