@@ -34,7 +34,7 @@ Theta introduces a product-safe acquisition path without weakening the core trus
 
 `rankSupplyOpportunities()` converts the durable Zeta demand ledger into a prioritized queue using repeated observations, source diversity, and recency. Existing verified capabilities are excluded when the recorded demand already names one.
 
-MCP tool:
+Public MCP tool:
 
 - `missing_supply_opportunities`
 
@@ -63,7 +63,7 @@ Every verification input is executed through the same recipe attempt primitive u
 
 Any failed run rejects the candidate immediately. A rejected candidate is never inserted into `VERIFIED_RECIPES`.
 
-MCP tool:
+Trusted-worker MCP tool:
 
 - `verify_supply_candidate`
 
@@ -73,7 +73,7 @@ This tool verifies only; it does not promote.
 
 `acquireVerifiedSupplyCandidate()` runs the complete gate sequence and promotes the candidate only after all live replays succeed.
 
-MCP tool:
+Trusted-worker MCP tool:
 
 - `acquire_verified_supply_candidate`
 
@@ -86,18 +86,34 @@ Successful promoted recipes are appended to a separate JSONL supply ledger and r
 Configuration:
 
 - `MISSING_SUPPLY_LEDGER` explicitly selects the ledger path.
-- When it is absent but `MISSING_DEMAND_LEDGER` is configured, Theta automatically uses `supply.jsonl` in the same directory.
+- Otherwise Theta derives `supply.jsonl` from the effective demand-ledger directory.
 - On Railway today that means `/data/supply.jsonl`, sharing the already-mounted persistent `/data` volume without changing the frozen experiment tree.
 
 `/healthz` and `/readyz` expose `supply_persistence`.
 
 ## Security and trust gates
 
-Product Theta intentionally supports only GET candidates in this milestone. Public candidate and evidence URLs must use HTTPS. Plain HTTP is accepted only for localhost/loopback test fixtures.
+Product Theta intentionally supports only GET candidates in this milestone. Public candidate and evidence URLs must use HTTPS. Plain HTTP loopback URLs are accepted only while `NODE_ENV=test` for controlled fixtures.
+
+Candidate URLs cannot contain embedded credentials. Obvious localhost, RFC1918/private IPv4, link-local, unique-local IPv6 and internal hostnames are rejected outside tests. This is an application-level guard; production infrastructure should still enforce outbound network policy as a second SSRF boundary.
 
 A minimum of two verification inputs is mandatory. This prevents a single lucky response from becoming executable supply.
 
 Duplicate recipe fingerprints are not registered twice.
+
+### Public sandbox vs trusted acquisition worker
+
+The public MISSING sandbox is intentionally **read-only with respect to new supply**. `verify_supply_candidate` and `acquire_verified_supply_candidate` remain registered for protocol discoverability but return `status: "disabled"` unless:
+
+```text
+MISSING_SUPPLY_ACQUISITION_ENABLED=1
+```
+
+That variable must only be enabled on a trusted acquisition worker/controller, not on the anonymous public Railway sandbox. This prevents an arbitrary external agent from making MISSING perform outbound verification requests or durably mutate its executable registry.
+
+`missing_supply_opportunities` remains safe to expose publicly because it only ranks already-recorded aggregate demand.
+
+`/healthz`, `/readyz`, and `missing_runtime_health` expose whether supply acquisition is enabled.
 
 ## Scientific boundary
 
@@ -117,8 +133,10 @@ Product Theta is complete when CI proves that:
 
 1. repeated unresolved demand ranks above one-off demand;
 2. recipe fingerprints are deterministic;
-3. fewer than two replay inputs cannot be verified;
-4. a provider failure rejects the candidate and leaves the registry unchanged;
-5. a candidate that passes every replay becomes executable through `resolveCapability()`;
-6. a promoted recipe survives registry reset by rehydrating from the durable supply ledger;
-7. existing Alpha–Eta behavior remains green.
+3. outbound acquisition is disabled by default on the public runtime;
+4. fewer than two replay inputs cannot be verified;
+5. unsafe candidate URL forms are rejected before provider execution;
+6. a provider failure rejects the candidate and leaves the registry unchanged;
+7. a candidate that passes every replay becomes executable through `resolveCapability()`;
+8. a promoted recipe survives registry reset by rehydrating from the durable supply ledger;
+9. existing Alpha–Eta behavior remains green.
