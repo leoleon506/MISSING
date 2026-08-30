@@ -4,9 +4,10 @@ import { createServer, type IncomingMessage } from "node:http";
 import { pathToFileURL } from "node:url";
 import { mountA2A } from "../a2a/server.js";
 import { supplyAcquisitionEnabled } from "../runtime/acquisition.js";
+import { authorizeControlPlane, controlPlaneCycleOptions, controlPlaneEnabled } from "../runtime/controlPlane.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
 import { openApiCompilerEnabled } from "../runtime/openApiCompiler.js";
-import { thetaOrchestratorEnabled } from "../runtime/orchestrator.js";
+import { runThetaOrchestrator, thetaOrchestratorEnabled } from "../runtime/orchestrator.js";
 import { providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
@@ -35,6 +36,7 @@ export function healthPayload() {
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
     theta_orchestrator_enabled: thetaOrchestratorEnabled(),
+    control_plane_enabled: controlPlaneEnabled(),
     sandbox: sandboxConfig().enabled,
   };
 }
@@ -58,6 +60,7 @@ export function readinessPayload(baseUrl: string) {
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
     theta_orchestrator_enabled: thetaOrchestratorEnabled(),
+    control_plane_enabled: controlPlaneEnabled(),
   };
 }
 
@@ -85,6 +88,29 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
   const app = express();
   app.disable("x-powered-by");
   if (process.env.RAILWAY_ENVIRONMENT || process.env.MISSING_TRUST_PROXY === "1") app.set("trust proxy", 1);
+
+  // Privileged control-plane route deliberately lives outside the anonymous sandbox
+  // middleware. It is inert unless a >=32-character bearer token is configured.
+  app.post("/internal/acquisition/run", async (req: ExpressRequest, res: ExpressResponse) => {
+    if (!controlPlaneEnabled()) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if (!authorizeControlPlane(req.get("authorization"))) {
+      res.setHeader("WWW-Authenticate", "Bearer");
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    try {
+      const result = await runThetaOrchestrator(controlPlaneCycleOptions());
+      res.status(200).json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`control-plane acquisition failed: ${message}\n`);
+      res.status(500).json({ error: "acquisition_cycle_failed" });
+    }
+  });
+
   app.use(sandboxMiddleware);
 
   app.all("/mcp", async (req: ExpressRequest, res: ExpressResponse) => {
