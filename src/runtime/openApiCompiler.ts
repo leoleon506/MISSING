@@ -8,12 +8,18 @@ import { harvestVerificationInputs, type VerificationInputEvidence } from "./ver
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 type OpenApiObject = Record<string, any>;
 
+export interface ProviderReadinessDiagnostics {
+  credentials_required: string[];
+  response_schema_missing: boolean;
+}
+
 export interface OpenApiCompileResult {
-  status: "candidate_ready" | "needs_verification_inputs" | "unsupported";
+  status: "candidate_ready" | "needs_verification_inputs" | "needs_provider_setup" | "unsupported";
   lead: ProviderDiscoveryCandidate;
   operation: { method: "GET"; path: string; operation_id: string | null; summary: string; score: number; matched_terms: string[] } | null;
   candidate: SupplyCandidate | null;
   verification_input_evidence: VerificationInputEvidence[];
+  provider_readiness: ProviderReadinessDiagnostics;
   missing: string[];
   reason: string | null;
 }
@@ -26,6 +32,8 @@ const STOP_WORDS = new Set([
   "a", "an", "and", "api", "for", "from", "in", "is", "me", "number", "of", "on", "or", "the", "this", "to", "with",
   "validate", "validation", "verify", "check", "find", "get", "lookup", "locate",
 ]);
+
+const EMPTY_READINESS: ProviderReadinessDiagnostics = { credentials_required: [], response_schema_missing: false };
 
 function tokens(text: string): string[] {
   return [...new Set(text.toLowerCase().match(/[a-z0-9]{2,}/g) ?? [])].filter(token => !STOP_WORDS.has(token));
@@ -92,6 +100,21 @@ function operationParameters(spec: OpenApiObject, pathItem: any, operation: any)
   return combined.map(param => resolveRef(spec, param)).filter(Boolean);
 }
 
+function credentialRequirements(spec: OpenApiObject, pathItem: any, operation: any): string[] {
+  const names = new Set<string>();
+  for (const param of operationParameters(spec, pathItem, operation)) {
+    if (param?.in === "header" && param?.required === true && typeof param?.name === "string") names.add(param.name);
+  }
+  const security = operation?.security ?? spec.security;
+  if (Array.isArray(security)) {
+    for (const requirement of security) {
+      if (!requirement || typeof requirement !== "object") continue;
+      for (const schemeName of Object.keys(requirement)) names.add(schemeName);
+    }
+  }
+  return [...names].sort();
+}
+
 function operationScore(path: string, operation: any, lead: ProviderDiscoveryCandidate) {
   const query = tokens(`${lead.normalized_intent} ${lead.matched_terms.join(" ")}`);
   const operationId = String(operation?.operationId ?? "");
@@ -139,24 +162,53 @@ function candidateId(lead: ProviderDiscoveryCandidate, path: string): string {
   return `theta2_${hash}`;
 }
 
+function operationView(selected: { path: string; operation: any; score: number; matched: string[] }) {
+  return { method: "GET" as const, path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched };
+}
+
 export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, options: { fetchFn?: FetchLike; verificationInputs?: RuntimeInput[]; capability?: string; family?: string } = {}): Promise<OpenApiCompileResult> {
   const fetchFn = options.fetchFn ?? fetch;
-  const response = await fetchFn(lead.spec_url, { headers: { accept: "application/json, application/yaml, text/yaml, */*", "user-agent": "MISSING-Theta6/0.2" } });
+  const response = await fetchFn(lead.spec_url, { headers: { accept: "application/json, application/yaml, text/yaml, */*", "user-agent": "MISSING-Theta8/0.2" } });
   if (!response.ok) throw new Error(`OpenAPI spec request failed with HTTP ${response.status}`);
   const spec = parseSpec(await response.text());
   const selected = selectOperation(spec, lead);
-  if (!selected) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], missing: ["get_operation"], reason: "No GET operation was found in the OpenAPI document" };
+  if (!selected) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: ["get_operation"], reason: "No GET operation was found in the OpenAPI document" };
   if (selected.score <= 0 || selected.matched.length === 0) {
-    return { status: "unsupported", lead, operation: { method: "GET", path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched }, candidate: null, verification_input_evidence: [], missing: ["relevant_get_operation"], reason: "No GET operation has semantic overlap with the unresolved demand" };
+    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: ["relevant_get_operation"], reason: "No GET operation has semantic overlap with the unresolved demand" };
   }
 
   const base_url = baseUrlFor(spec, selected.operation);
-  if (!base_url) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], missing: ["https_base_url"], reason: "Could not derive a static HTTPS base URL" };
+  if (!base_url) return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: ["https_base_url"], reason: "Could not derive a static HTTPS base URL" };
+
+  const credentials_required = credentialRequirements(spec, selected.pathItem, selected.operation);
+  const selectedResponseSchema = responseSchema(spec, selected.operation);
+  const response_schema_missing = !selectedResponseSchema;
+  const provider_readiness: ProviderReadinessDiagnostics = { credentials_required, response_schema_missing };
+  if (credentials_required.length || response_schema_missing) {
+    const missing = [
+      ...credentials_required.map(name => `credential:${name}`),
+      ...(response_schema_missing ? ["response_schema"] : []),
+    ];
+    const reasons = [
+      ...(credentials_required.length ? [`credentials required: ${credentials_required.join(", ")}`] : []),
+      ...(response_schema_missing ? ["success response schema is not documented"] : []),
+    ];
+    return {
+      status: "needs_provider_setup",
+      lead,
+      operation: operationView(selected),
+      candidate: null,
+      verification_input_evidence: [],
+      provider_readiness,
+      missing,
+      reason: `Relevant provider cannot enter automatic verification yet because ${reasons.join("; ")}`,
+    };
+  }
 
   const { path_bindings, query_bindings, parameters } = deriveBindings(spec, selected.pathItem, selected.operation);
-  const { projection, required } = topLevelProjection(spec, responseSchema(spec, selected.operation));
+  const { projection, required } = topLevelProjection(spec, selectedResponseSchema);
   if (!Object.keys(projection).length) {
-    return { status: "unsupported", lead, operation: { method: "GET", path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched }, candidate: null, verification_input_evidence: [], missing: ["object_response_projection"], reason: "The selected operation does not expose a simple top-level JSON object schema that Theta can project deterministically" };
+    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness, missing: ["object_response_projection"], reason: "The selected operation does not expose a simple top-level JSON object schema that Theta can project deterministically" };
   }
 
   const harvested = options.verificationInputs === undefined ? harvestVerificationInputs(parameters) : null;
@@ -171,8 +223,7 @@ export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, optio
   if (verification_inputs.length < 2) missing.push("verification_inputs");
   return {
     status: missing.length ? "needs_verification_inputs" : "candidate_ready", lead,
-    operation: { method: "GET", path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched },
-    candidate, verification_input_evidence: harvested?.evidence ?? [], missing,
+    operation: operationView(selected), candidate, verification_input_evidence: harvested?.evidence ?? [], provider_readiness, missing,
     reason: missing.length ? "Theta requires two independent replay inputs grounded in explicit caller data or OpenAPI examples, enum values, or defaults; MISSING will not invent them" : null,
   };
 }

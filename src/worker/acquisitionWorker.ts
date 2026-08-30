@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 
 export interface WorkerCycleResult {
-  status: "promoted" | "rejected" | "needs_evidence" | "no_candidates";
+  status: "promoted" | "rejected" | "needs_evidence" | "needs_provider_setup" | "no_candidates";
   [key: string]: unknown;
 }
 
@@ -26,14 +26,14 @@ export async function runTrustedWorkerCycle(options: {
     headers: {
       authorization: `Bearer ${token}`,
       accept: "application/json",
-      "user-agent": "MISSING-Theta5-Worker/0.2",
+      "user-agent": "MISSING-Theta8-Worker/0.2",
     },
     signal: AbortSignal.timeout(options.timeoutMs ?? 120_000),
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`MISSING control plane returned HTTP ${response.status}: ${text.slice(0, 500)}`);
   const parsed = JSON.parse(text) as WorkerCycleResult;
-  if (!parsed || typeof parsed !== "object" || !["promoted", "rejected", "needs_evidence", "no_candidates"].includes(parsed.status)) {
+  if (!parsed || typeof parsed !== "object" || !["promoted", "rejected", "needs_evidence", "needs_provider_setup", "no_candidates"].includes(parsed.status)) {
     throw new Error("MISSING control plane returned an invalid acquisition result");
   }
   return parsed;
