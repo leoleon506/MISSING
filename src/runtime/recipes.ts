@@ -1,4 +1,5 @@
 import type { RuntimeInput, VerifiedRecipe } from "./types.js";
+import { appendPromotedRecipe, readPromotedRecipes } from "./supplyLedger.js";
 
 const verified = (recipe: Omit<VerifiedRecipe, "verification">): VerifiedRecipe => ({
   ...recipe,
@@ -23,7 +24,7 @@ const productVerified = (
   },
 });
 
-export const VERIFIED_RECIPES: VerifiedRecipe[] = [
+const BASE_VERIFIED_RECIPES: VerifiedRecipe[] = [
   verified({
     capability: "country_alpha_metadata", family: "geography", provider: "Warnely",
     provider_candidate_id: "r2045_5d53d45e3f", recipe_fingerprint: "2397865423586696accd6acb37c134ff1d9b60c107807a8f34449646e51f89e3",
@@ -86,4 +87,31 @@ export const VERIFIED_RECIPES: VerifiedRecipe[] = [
   }),
 ];
 
+const baseFingerprints = new Set(BASE_VERIFIED_RECIPES.map(recipe => recipe.recipe_fingerprint));
+const initialPromoted = readPromotedRecipes().filter(recipe => !baseFingerprints.has(recipe.recipe_fingerprint));
+
+export const VERIFIED_RECIPES: VerifiedRecipe[] = [...BASE_VERIFIED_RECIPES, ...initialPromoted];
+
 export const recipesForCapability = (capability: string) => VERIFIED_RECIPES.filter(r => r.capability === capability);
+
+export function registerPromotedRecipe(recipe: VerifiedRecipe): { added: boolean; recipe: VerifiedRecipe } {
+  const existing = VERIFIED_RECIPES.find(item => item.recipe_fingerprint === recipe.recipe_fingerprint);
+  if (existing) return { added: false, recipe: existing };
+  appendPromotedRecipe(recipe);
+  VERIFIED_RECIPES.push(recipe);
+  return { added: true, recipe };
+}
+
+export function reloadPromotedRecipesFromLedger() {
+  VERIFIED_RECIPES.splice(BASE_VERIFIED_RECIPES.length);
+  const seen = new Set(BASE_VERIFIED_RECIPES.map(recipe => recipe.recipe_fingerprint));
+  for (const recipe of readPromotedRecipes()) {
+    if (seen.has(recipe.recipe_fingerprint)) continue;
+    VERIFIED_RECIPES.push(recipe);
+    seen.add(recipe.recipe_fingerprint);
+  }
+}
+
+export function resetPromotedRecipesForTest() {
+  VERIFIED_RECIPES.splice(BASE_VERIFIED_RECIPES.length);
+}
