@@ -23,8 +23,8 @@ afterAll(async () => productMcpHandler.close());
 
 describe("MISSING Product Delta remote MCP edge", () => {
   it("connects in-process and discovers the Product Alpha/Beta/Gamma tools", async () => {
-    const { client } = clientForHandler();
-    await client.connect(clientForHandler().transport);
+    const { client, transport } = clientForHandler();
+    await client.connect(transport);
     const tools = await client.listTools();
     const names = tools.tools.map(tool => tool.name);
     expect(names).toEqual(expect.arrayContaining([
