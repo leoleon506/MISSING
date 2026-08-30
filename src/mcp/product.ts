@@ -1,11 +1,15 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, verifySupplyCandidate } from "../runtime/acquisition.js";
+import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, supplyAcquisitionEnabled, verifySupplyCandidate } from "../runtime/acquisition.js";
 import { demandSnapshot, demandSummary, recordDemand, searchCapabilities } from "../runtime/discovery.js";
 import { resolveCapability, runtimeHealth } from "../runtime/executor.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 
 const content = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
+const acquisitionDisabled = () => content({
+  status: "disabled",
+  reason: "Supply verification and promotion are disabled on this public runtime. Enable only on a trusted acquisition worker with MISSING_SUPPLY_ACQUISITION_ENABLED=1.",
+});
 
 const projectionRuleSchema = z.union([
   z.object({ op: z.literal("INPUT"), name: z.string().min(1) }),
@@ -64,14 +68,14 @@ export function registerProductTools(server: McpServer) {
   }, async args => content({ opportunities: rankSupplyOpportunities(args.limit ?? 10) }));
 
   server.registerTool("verify_supply_candidate", {
-    description: "Live-replay a proposed GET provider recipe against at least two verification inputs. This does not register the candidate and returns rejected on any failed replay or projection.",
+    description: "On a trusted acquisition worker, live-replay a proposed GET provider recipe against at least two verification inputs. Public runtimes keep this disabled by default.",
     inputSchema: supplyCandidateSchema,
-  }, async args => content(await verifySupplyCandidate(args)));
+  }, async args => supplyAcquisitionEnabled() ? content(await verifySupplyCandidate(args)) : acquisitionDisabled());
 
   server.registerTool("acquire_verified_supply_candidate", {
-    description: "Verify a proposed provider candidate with repeated live replay and, only if every gate passes, promote it into MISSING's durable executable recipe registry. Failed candidates are never registered.",
+    description: "On a trusted acquisition worker, verify a provider candidate and promote it only after every replay gate passes. Public runtimes keep this disabled by default.",
     inputSchema: supplyCandidateSchema,
-  }, async args => content(await acquireVerifiedSupplyCandidate(args)));
+  }, async args => supplyAcquisitionEnabled() ? content(await acquireVerifiedSupplyCandidate(args)) : acquisitionDisabled());
 
   server.registerTool("resolve_capability", {
     description: "Execute a capability using only a replay-verified provider recipe. Returns unavailable rather than inventing an unverified integration.",
@@ -84,5 +88,5 @@ export function registerProductTools(server: McpServer) {
   server.registerTool("missing_runtime_health", {
     description: "Return process-local provider recipe health and circuit-breaker state for the MISSING runtime.",
     inputSchema: z.object({}),
-  }, async () => content({ health: runtimeHealth() }));
+  }, async () => content({ health: runtimeHealth(), supply_acquisition_enabled: supplyAcquisitionEnabled() }));
 }
