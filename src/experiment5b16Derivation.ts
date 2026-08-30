@@ -2,6 +2,7 @@ import {deriveExperiment5b14Source} from "./experiment5b14Derivation.js";
 
 function r(s:string,a:string,b:string){if(!s.includes(a))throw new Error(`5b16_anchor_missing:${a.slice(0,180)}`);return s.replace(a,b)}
 function replaceBetween(s:string,start:string,end:string,replacement:string){const a=s.indexOf(start),b=s.indexOf(end,a+start.length);if(a<0||b<0)throw new Error(`5b16_range_anchor_missing:${start}`);return s.slice(0,a)+replacement+s.slice(b)}
+function replaceBetweenAfter(s:string,after:string,start:string,end:string,replacement:string){const p=s.indexOf(after);if(p<0)throw new Error(`5b16_after_anchor_missing:${after.slice(0,180)}`);const a=s.indexOf(start,p+after.length),b=s.indexOf(end,a+start.length);if(a<0||b<0)throw new Error(`5b16_range_after_anchor_missing:${start}`);return s.slice(0,a)+replacement+s.slice(b)}
 
 const FROZEN_LOOP=`let authLikeRenderedRequests5b16=0,wrongTaskProbeAttempts5b16=0;
 for(const primary of frozen5b16.primaries){
@@ -36,7 +37,7 @@ export function deriveExperiment5b16Source(source:string){let x=deriveExperiment
  x=r(x,'const OUT="results/experiment-5b14-engine",MAX_BYTES=FOUR_A_BUDGET.max_bytes;','const OUT="results/experiment-5b16-engine",MAX_BYTES=FOUR_A_BUDGET.max_bytes;');
  x=r(x,'catalogFetches++;const catalog=(await fetchTextSafeR2(PUBLIC_APIS_URL,PUBLIC_APIS_URL,MAX_BYTES,ledger)).text;','const frozen5b16=loadFiveB16Workload();catalogFetches++;const frozenCatalogUrl=frozen5b16.public_apis_snapshot.raw_url;const catalog=(await fetchTextSafeR2(frozenCatalogUrl,frozenCatalogUrl,MAX_BYTES,ledger)).text;');
  x=replaceBetween(x,'let mechanicalFrontier=true;const rerankPhaseStart4p=Date.now()','const before=',FROZEN_LOOP);
- x=replaceBetween(x,'const before=','main().catch',FINAL_REPORT);
+ x=replaceBetweenAfter(x,'unhealthy_after_5b15:primary.unhealthy_after_5b15','const before=','main().catch',FINAL_REPORT);
  x=x.replaceAll('experiment:"5B14-ENGINE"','experiment:"5B16-ENGINE"').replaceAll('purpose:"development_symmetric_request_local_operation_compatibility_engine"','purpose:"development_verified_recipe_redundancy_acquisition_engine"');
  return x;
 }
