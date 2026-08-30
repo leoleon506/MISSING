@@ -2,7 +2,7 @@ import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, type SupplyOpp
 import { compileOpenApiLead, type OpenApiCompileResult } from "./openApiCompiler.js";
 import { discoverProviderCandidates, type ProviderDiscoveryCandidate } from "./providerDiscovery.js";
 
-export type Theta4Status = "promoted" | "rejected" | "needs_evidence" | "no_candidates";
+export type Theta4Status = "promoted" | "rejected" | "needs_evidence" | "needs_provider_setup" | "no_candidates";
 
 export interface Theta4TraceStep {
   stage: "opportunity" | "discovery" | "compile" | "verify_promote";
@@ -62,6 +62,7 @@ export async function runThetaOrchestrator(options: {
   const compileFn = options.compileFn ?? (lead => compileOpenApiLead(lead));
   const acquireFn = options.acquireFn ?? acquireVerifiedSupplyCandidate;
   let sawNeedsEvidence = false;
+  let providerSetupReason: string | null = null;
   let lastRejection: string | null = null;
 
   for (const lead of leads) {
@@ -83,6 +84,10 @@ export async function runThetaOrchestrator(options: {
       detail: compiled.reason ?? undefined,
     });
 
+    if (compiled.status === "needs_provider_setup") {
+      providerSetupReason ??= compiled.reason ?? "Relevant provider requires setup before automatic verification";
+      continue;
+    }
     if (compiled.status === "needs_verification_inputs") {
       sawNeedsEvidence = true;
       continue;
@@ -121,6 +126,9 @@ export async function runThetaOrchestrator(options: {
 
   if (sawNeedsEvidence) {
     return { status: "needs_evidence", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: "At least one provider lead compiled but lacked two evidence-backed verification inputs" };
+  }
+  if (providerSetupReason) {
+    return { status: "needs_provider_setup", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: providerSetupReason };
   }
   return { status: "rejected", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: lastRejection ?? "All discovered provider candidates were rejected" };
 }
