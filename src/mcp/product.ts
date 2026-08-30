@@ -3,12 +3,17 @@ import { z } from "zod";
 import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, supplyAcquisitionEnabled, verifySupplyCandidate } from "../runtime/acquisition.js";
 import { demandSnapshot, demandSummary, recordDemand, searchCapabilities } from "../runtime/discovery.js";
 import { resolveCapability, runtimeHealth } from "../runtime/executor.js";
+import { discoverTopSupplyCandidates, providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 
 const content = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
 const acquisitionDisabled = () => content({
   status: "disabled",
   reason: "Supply verification and promotion are disabled on this public runtime. Enable only on a trusted acquisition worker with MISSING_SUPPLY_ACQUISITION_ENABLED=1.",
+});
+const discoveryDisabled = () => content({
+  status: "disabled",
+  reason: "Provider discovery is disabled on this public runtime. Enable only on a trusted discovery worker with MISSING_PROVIDER_DISCOVERY_ENABLED=1.",
 });
 
 const projectionRuleSchema = z.union([
@@ -67,6 +72,16 @@ export function registerProductTools(server: McpServer) {
     }),
   }, async args => content({ opportunities: rankSupplyOpportunities(args.limit ?? 10) }));
 
+  server.registerTool("discover_supply_candidates", {
+    description: "On a trusted discovery worker, search a structured public API directory for provider candidates matching the highest-priority unresolved demand. Results are unverified leads only and cannot execute or promote themselves.",
+    inputSchema: z.object({
+      opportunity_limit: z.number().int().min(1).max(20).optional(),
+      candidates_per_opportunity: z.number().int().min(1).max(20).optional(),
+    }),
+  }, async args => providerDiscoveryEnabled()
+    ? content({ results: await discoverTopSupplyCandidates({ opportunityLimit: args.opportunity_limit ?? 5, candidatesPerOpportunity: args.candidates_per_opportunity ?? 5 }) })
+    : discoveryDisabled());
+
   server.registerTool("verify_supply_candidate", {
     description: "On a trusted acquisition worker, live-replay a proposed GET provider recipe against at least two verification inputs. Public runtimes keep this disabled by default.",
     inputSchema: supplyCandidateSchema,
@@ -88,5 +103,9 @@ export function registerProductTools(server: McpServer) {
   server.registerTool("missing_runtime_health", {
     description: "Return process-local provider recipe health and circuit-breaker state for the MISSING runtime.",
     inputSchema: z.object({}),
-  }, async () => content({ health: runtimeHealth(), supply_acquisition_enabled: supplyAcquisitionEnabled() }));
+  }, async () => content({
+    health: runtimeHealth(),
+    supply_acquisition_enabled: supplyAcquisitionEnabled(),
+    provider_discovery_enabled: providerDiscoveryEnabled(),
+  }));
 }

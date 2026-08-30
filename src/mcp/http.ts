@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { mountA2A } from "../a2a/server.js";
 import { supplyAcquisitionEnabled } from "../runtime/acquisition.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
+import { providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
 import { supplyLedgerPath } from "../runtime/supplyLedger.js";
@@ -29,6 +30,7 @@ export function healthPayload() {
     demand_persistence: demandLedgerPath() !== null,
     supply_persistence: supplyLedgerPath() !== null,
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
+    provider_discovery_enabled: providerDiscoveryEnabled(),
     sandbox: sandboxConfig().enabled,
   };
 }
@@ -49,6 +51,7 @@ export function readinessPayload(baseUrl: string) {
     demand_persistence,
     supply_persistence,
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
+    provider_discovery_enabled: providerDiscoveryEnabled(),
   };
 }
 
