@@ -35,7 +35,7 @@ export function deriveExperiment5b16Source(source:string){let x=deriveExperiment
  x='import {authLikeRenderedUrl5b16,independentProviderDomain5b16,loadFiveB16Workload,resolveFrozenTail5b16} from "./experiment5b16Workload.js";\n'+x;
  x=r(x,'const OUT="results/experiment-5b14-engine",MAX_BYTES=FOUR_A_BUDGET.max_bytes;','const OUT="results/experiment-5b16-engine",MAX_BYTES=FOUR_A_BUDGET.max_bytes;');
  x=r(x,'catalogFetches++;const catalog=(await fetchTextSafeR2(PUBLIC_APIS_URL,PUBLIC_APIS_URL,MAX_BYTES,ledger)).text;','const frozen5b16=loadFiveB16Workload();catalogFetches++;const frozenCatalogUrl=frozen5b16.public_apis_snapshot.raw_url;const catalog=(await fetchTextSafeR2(frozenCatalogUrl,frozenCatalogUrl,MAX_BYTES,ledger)).text;');
- x=replaceBetween(x,'for(const c of FOUR_A_CASES){','const before=',FROZEN_LOOP);
+ x=replaceBetween(x,'let mechanicalFrontier=true;const rerankPhaseStart4p=Date.now()','const before=',FROZEN_LOOP);
  x=replaceBetween(x,'const before=','main().catch',FINAL_REPORT);
  x=x.replaceAll('experiment:"5B14-ENGINE"','experiment:"5B16-ENGINE"').replaceAll('purpose:"development_symmetric_request_local_operation_compatibility_engine"','purpose:"development_verified_recipe_redundancy_acquisition_engine"');
  return x;
