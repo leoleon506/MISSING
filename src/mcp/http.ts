@@ -7,6 +7,7 @@ import { supplyAcquisitionEnabled } from "../runtime/acquisition.js";
 import { agentRankEnabled, agentRankExplorationEnabled, agentRankLedgerPath } from "../runtime/agentRank.js";
 import { authorizeControlPlane, controlPlaneCycleOptions, controlPlaneEnabled } from "../runtime/controlPlane.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
+import { economicsEnforcementEnabled, economicsLedgerPath } from "../runtime/economics.js";
 import { openApiCompilerEnabled } from "../runtime/openApiCompiler.js";
 import { runThetaOrchestrator, thetaOrchestratorEnabled } from "../runtime/orchestrator.js";
 import { providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
@@ -36,6 +37,8 @@ export function healthPayload() {
     agentrank_enabled: agentRankEnabled(),
     agentrank_exploration_enabled: agentRankExplorationEnabled(),
     agentrank_persistence: agentRankLedgerPath() !== null,
+    economics_enforcement_enabled: economicsEnforcementEnabled(),
+    economics_persistence: economicsLedgerPath() !== null,
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
@@ -56,6 +59,7 @@ export function readinessPayload(baseUrl: string) {
   const demand_persistence = demandLedgerPath() !== null;
   const supply_persistence = supplyLedgerPath() !== null;
   const agentrank_persistence = agentRankLedgerPath() !== null;
+  const economics_persistence = economicsLedgerPath() !== null;
   return {
     status: public_url_valid && demand_persistence && supply_persistence && agentrank_persistence ? "ready" : "not_ready",
     public_url_valid,
@@ -64,6 +68,8 @@ export function readinessPayload(baseUrl: string) {
     agentrank_enabled: agentRankEnabled(),
     agentrank_exploration_enabled: agentRankExplorationEnabled(),
     agentrank_persistence,
+    economics_enforcement_enabled: economicsEnforcementEnabled(),
+    economics_persistence,
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
@@ -97,8 +103,6 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
   app.disable("x-powered-by");
   if (process.env.RAILWAY_ENVIRONMENT || process.env.MISSING_TRUST_PROXY === "1") app.set("trust proxy", 1);
 
-  // Privileged control-plane route deliberately lives outside the anonymous sandbox
-  // middleware. It is inert unless a >=32-character bearer token is configured.
   app.post("/internal/acquisition/run", async (req: ExpressRequest, res: ExpressResponse) => {
     if (!controlPlaneEnabled()) {
       res.status(404).json({ error: "not_found" });
