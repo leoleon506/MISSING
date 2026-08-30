@@ -37,15 +37,23 @@ describe("MISSING Product Zeta persistent demand intelligence", () => {
     expect(snapshot[0]?.normalized_intent).toBe("validate this finnish vat number");
   });
 
-  it("keeps bounded examples while aggregating repeated observations", () => {
+  it("keeps bounded examples while aggregating equivalent observations", () => {
     useTempLedger();
-    for (let index = 0; index < 8; index += 1) {
-      recordDemand(`Need tax validation variant ${index}`, "tax_validation", "runtime");
-    }
+    const variants = [
+      "Validate Finnish VAT!",
+      "Validate Finnish VAT.",
+      "Validate Finnish VAT?",
+      "Validate Finnish VAT;",
+      "Validate Finnish VAT:",
+      "Validate Finnish VAT,",
+      "Validate Finnish VAT...",
+    ];
+    for (const variant of variants) recordDemand(variant, "tax_validation", "runtime");
 
     const snapshot = demandSnapshot();
-    expect(snapshot).toHaveLength(8);
-    expect(snapshot.every(item => item.examples.length <= 5)).toBe(true);
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0]?.count).toBe(variants.length);
+    expect(snapshot[0]?.examples).toHaveLength(5);
   });
 
   it("summarizes total observations and protocol sources", () => {
