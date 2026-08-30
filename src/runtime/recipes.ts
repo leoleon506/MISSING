@@ -1,12 +1,25 @@
-import type { VerifiedRecipe } from "./types.js";
+import type { RuntimeInput, VerifiedRecipe } from "./types.js";
 
 const verified = (recipe: Omit<VerifiedRecipe, "verification">): VerifiedRecipe => ({
   ...recipe,
   verification: {
     status: "replay_verified",
+    source: "experiment",
     source_experiment: "5B14",
     resilience_experiment: "5B15",
     source_run_id: 33283645154,
+  },
+});
+
+const productVerified = (
+  recipe: Omit<VerifiedRecipe, "verification">,
+  verification: { verification_inputs: RuntimeInput[]; verified_at: string; evidence_url: string },
+): VerifiedRecipe => ({
+  ...recipe,
+  verification: {
+    status: "replay_verified",
+    source: "product_live",
+    ...verification,
   },
 });
 
@@ -18,6 +31,18 @@ export const VERIFIED_RECIPES: VerifiedRecipe[] = [
     path_bindings: { iso: "$input.country_code" }, query_bindings: {},
     projection: { country_code: { op: "INPUT", name: "country_code" }, region: { op: "FIELD", path: "country.region" }, country_name: { op: "FIELD", path: "country.name" } },
     required: ["country_code", "country_name", "region"], example_input: { country_code: "JP" },
+  }),
+  productVerified({
+    capability: "country_alpha_metadata", family: "geography", provider: "countries.dev",
+    provider_candidate_id: "product_countries_dev_alpha", recipe_fingerprint: "c0a7d71e636f89ac19a5f652680f0f004d0dbf0d6452b894f96818825462a017",
+    method: "GET", base_url: "https://countries.dev", path_template: "/alpha/{code}",
+    path_bindings: { code: "$input.country_code" }, query_bindings: {},
+    projection: { country_code: { op: "FIELD", path: "alpha2Code" }, region: { op: "FIELD", path: "region" }, country_name: { op: "FIELD", path: "name" } },
+    required: ["country_code", "country_name", "region"], example_input: { country_code: "JP" },
+  }, {
+    verification_inputs: [{ country_code: "JP" }, { country_code: "US" }],
+    verified_at: "2026-08-30",
+    evidence_url: "https://countries.dev/docs/api/alpha",
   }),
   verified({
     capability: "pokemon_name_metadata", family: "games", provider: "Pokéapi",
