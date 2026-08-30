@@ -7,6 +7,7 @@ import {
   acquireVerifiedSupplyCandidate,
   candidateFingerprint,
   rankSupplyOpportunities,
+  supplyAcquisitionEnabled,
   verifySupplyCandidate,
   type SupplyCandidate,
 } from "../src/runtime/acquisition.js";
@@ -43,13 +44,14 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  delete process.env.MISSING_SUPPLY_ACQUISITION_ENABLED;
   resetDemand();
   resetPromotedRecipesForTest();
   truncateSupplyLedger();
 });
 
 afterAll(async () => {
-  configureSupplyLedger(null);
+  configureSupplyLedger(undefined);
   rmSync(tempDir, { recursive: true, force: true });
   await new Promise<void>(resolve => server.close(() => resolve()));
 });
@@ -79,6 +81,13 @@ function candidate(overrides: Partial<SupplyCandidate> = {}): SupplyCandidate {
 }
 
 describe("MISSING Product Theta demand-to-supply acquisition", () => {
+  it("keeps outbound supply acquisition disabled by default", () => {
+    delete process.env.MISSING_SUPPLY_ACQUISITION_ENABLED;
+    expect(supplyAcquisitionEnabled()).toBe(false);
+    process.env.MISSING_SUPPLY_ACQUISITION_ENABLED = "1";
+    expect(supplyAcquisitionEnabled()).toBe(true);
+  });
+
   it("ranks repeated unresolved demand ahead of one-off demand", () => {
     recordDemand("Validate this Finnish VAT number", null, "a2a");
     recordDemand("Validate this Finnish VAT number", null, "mcp");
@@ -101,6 +110,11 @@ describe("MISSING Product Theta demand-to-supply acquisition", () => {
   it("requires at least two live replay inputs", async () => {
     await expect(verifySupplyCandidate(candidate({ verification_inputs: [{ vat_number: "FI12345678" }] })))
       .rejects.toThrow("At least two verification_inputs");
+  });
+
+  it("rejects URLs containing embedded credentials before any provider call", async () => {
+    await expect(verifySupplyCandidate(candidate({ evidence_url: "https://user:secret@example.com/docs" })))
+      .rejects.toThrow("evidence_url cannot contain URL credentials");
   });
 
   it("rejects a candidate when any live replay fails and never registers it", async () => {
