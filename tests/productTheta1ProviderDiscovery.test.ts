@@ -24,41 +24,22 @@ function directoryResponse(status = 200) {
   const payload = {
     "weather.example": {
       preferred: "1.0",
-      versions: {
-        "1.0": {
-          info: { title: "Weather API", description: "Forecast and current conditions" },
-          swaggerUrl: "https://specs.example/weather.json",
-          link: "https://apis.guru/apis/weather.example",
-          openapiVer: "3.0.0",
-        },
-      },
+      versions: { "1.0": { info: { title: "Weather API", description: "Forecast and current conditions" }, swaggerUrl: "https://specs.example/weather.json" } },
+    },
+    "azure-reservation.example": {
+      preferred: "1.0",
+      versions: { "1.0": { info: { title: "Azure Reservation", description: "Private reservation management" }, swaggerUrl: "https://specs.example/reservation.json" } },
     },
     "finnish-vat.example": {
       preferred: "2.0",
       versions: {
-        "1.0": {
-          info: { title: "Old VAT API", description: "Legacy" },
-          swaggerUrl: "https://specs.example/vat-v1.json",
-        },
-        "2.0": {
-          info: { title: "Finnish VAT Validation API", description: "Validate Finnish VAT identifiers" },
-          swaggerUrl: "https://specs.example/vat-v2.json",
-          link: "https://apis.guru/apis/finnish-vat.example",
-          openapiVer: "3.1.0",
-        },
+        "1.0": { info: { title: "Old VAT API", description: "Legacy" }, swaggerUrl: "https://specs.example/vat-v1.json" },
+        "2.0": { info: { title: "Finnish VAT Validation API", description: "Validate Finnish VAT identifiers" }, swaggerUrl: "https://specs.example/vat-v2.json", link: "https://apis.guru/apis/finnish-vat.example", openapiVer: "3.1.0" },
       },
     },
-    "vat-no-spec.example": {
-      preferred: "1.0",
-      versions: {
-        "1.0": { info: { title: "Finnish VAT without spec" } },
-      },
-    },
+    "vat-no-spec.example": { preferred: "1.0", versions: { "1.0": { info: { title: "Finnish VAT without spec" } } } },
   };
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
+  return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
 }
 
 const fakeFetch = async () => directoryResponse();
@@ -89,16 +70,16 @@ describe("MISSING Product Theta.1 provider discovery", () => {
     expect(first.score).toBeGreaterThan(0.5);
   });
 
+  it("does not match VAT as a substring of reservation or private", async () => {
+    const candidates = await discoverProviderCandidates(opportunity, { fetchFn: fakeFetch, limit: 10 });
+    expect(candidates.some(candidate => candidate.provider === "Azure Reservation")).toBe(false);
+  });
+
   it("uses the durable demand ranking as the automatic discovery queue", async () => {
     recordDemand("Validate this Finnish VAT number", null, "a2a");
     recordDemand("Validate this Finnish VAT number", null, "mcp");
     recordDemand("Find a fictional registry record", null, "a2a");
-
-    const results = await discoverTopSupplyCandidates({
-      fetchFn: fakeFetch,
-      opportunityLimit: 1,
-      candidatesPerOpportunity: 3,
-    });
+    const results = await discoverTopSupplyCandidates({ fetchFn: fakeFetch, opportunityLimit: 1, candidatesPerOpportunity: 3 });
     expect(results).toHaveLength(1);
     expect(results[0]?.opportunity.normalized_intent).toBe("validate this finnish vat number");
     expect(results[0]?.candidates[0]?.directory_id).toBe("finnish-vat.example");
@@ -106,7 +87,6 @@ describe("MISSING Product Theta.1 provider discovery", () => {
 
   it("fails closed when the provider directory is unavailable", async () => {
     const unavailable = async () => new Response("unavailable", { status: 503 });
-    await expect(discoverProviderCandidates(opportunity, { fetchFn: unavailable }))
-      .rejects.toThrow("Provider directory request failed with HTTP 503");
+    await expect(discoverProviderCandidates(opportunity, { fetchFn: unavailable })).rejects.toThrow("Provider directory request failed with HTTP 503");
   });
 });
