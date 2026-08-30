@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { mountA2A } from "../a2a/server.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
+import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
 import { createProductServer } from "./server.js";
 
 export const productMcpHandler = createMcpHandler(() => createProductServer());
@@ -18,6 +19,23 @@ export function healthPayload() {
     recipe_count: VERIFIED_RECIPES.length,
     transports: ["mcp-streamable-http", "a2a-jsonrpc"],
     demand_persistence: demandLedgerPath() !== null,
+    sandbox: sandboxConfig().enabled,
+  };
+}
+
+export function readinessPayload(baseUrl: string) {
+  let public_url_valid = false;
+  try {
+    const parsed = new URL(baseUrl);
+    public_url_valid = parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    public_url_valid = false;
+  }
+  const demand_persistence = demandLedgerPath() !== null;
+  return {
+    status: public_url_valid && demand_persistence ? "ready" : "not_ready",
+    public_url_valid,
+    demand_persistence,
   };
 }
 
@@ -43,6 +61,8 @@ async function writeWebResponse(response: Response, res: ExpressResponse) {
 
 export function createProductHttpApp(baseUrl = process.env.PUBLIC_BASE_URL ?? "http://127.0.0.1:3000") {
   const app = express();
+  app.disable("x-powered-by");
+  app.use(sandboxMiddleware);
 
   app.all("/mcp", async (req: ExpressRequest, res: ExpressResponse) => {
     try {
@@ -53,8 +73,27 @@ export function createProductHttpApp(baseUrl = process.env.PUBLIC_BASE_URL ?? "h
     }
   });
 
+  app.get("/livez", (_req, res) => {
+    res.status(200).json({ status: "live" });
+  });
+
+  app.get("/readyz", (_req, res) => {
+    const payload = readinessPayload(baseUrl);
+    res.status(payload.status === "ready" ? 200 : 503).json(payload);
+  });
+
   app.get("/healthz", (_req, res) => {
     res.status(200).json(healthPayload());
+  });
+
+  app.get("/sandboxz", (_req, res) => {
+    const config = sandboxConfig();
+    res.status(200).json({
+      sandbox: config.enabled,
+      requests_per_window: config.requests_per_window,
+      window_ms: config.window_ms,
+      telemetry: sandboxSnapshot(),
+    });
   });
 
   mountA2A(app, baseUrl);
@@ -86,6 +125,7 @@ export async function serveHttp() {
   });
   process.stdout.write(`MISSING remote MCP listening on ${publicBaseUrl}/mcp\n`);
   process.stdout.write(`MISSING A2A Agent Card on ${publicBaseUrl}/.well-known/agent-card.json\n`);
+  process.stdout.write(`MISSING sandbox status on ${publicBaseUrl}/sandboxz\n`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await serveHttp();
