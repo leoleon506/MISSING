@@ -3,6 +3,7 @@ import YAML from "yaml";
 import type { SupplyCandidate } from "./acquisition.js";
 import type { ProviderDiscoveryCandidate } from "./providerDiscovery.js";
 import type { ProjectionRule, RuntimeInput } from "./types.js";
+import { harvestVerificationInputs, type VerificationInputEvidence } from "./verificationInputHarvest.js";
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -20,6 +21,7 @@ export interface OpenApiCompileResult {
     matched_terms: string[];
   } | null;
   candidate: SupplyCandidate | null;
+  verification_input_evidence: VerificationInputEvidence[];
   missing: string[];
   reason: string | null;
 }
@@ -130,16 +132,16 @@ function selectOperation(spec: OpenApiObject, lead: ProviderDiscoveryCandidate) 
 function deriveBindings(spec: OpenApiObject, pathItem: any, operation: any) {
   const path_bindings: Record<string, string> = {};
   const query_bindings: Record<string, string> = {};
-  const inputs = new Set<string>();
+  const parameters: Array<{ input_name: string; parameter: any }> = [];
   for (const param of operationParameters(spec, pathItem, operation)) {
     if (typeof param?.name !== "string" || (param.in !== "path" && param.in !== "query")) continue;
     if (param.required !== true && param.in !== "path") continue;
     const inputName = slug(param.name, "input");
-    inputs.add(inputName);
+    parameters.push({ input_name: inputName, parameter: param });
     if (param.in === "path") path_bindings[param.name] = `$input.${inputName}`;
     else query_bindings[param.name] = `$input.${inputName}`;
   }
-  return { path_bindings, query_bindings, inputs: [...inputs] };
+  return { path_bindings, query_bindings, parameters };
 }
 
 function candidateId(lead: ProviderDiscoveryCandidate, path: string): string {
@@ -157,16 +159,16 @@ export async function compileOpenApiLead(
   } = {},
 ): Promise<OpenApiCompileResult> {
   const fetchFn = options.fetchFn ?? fetch;
-  const response = await fetchFn(lead.spec_url, { headers: { accept: "application/json, application/yaml, text/yaml, */*", "user-agent": "MISSING-Theta2/0.2" } });
+  const response = await fetchFn(lead.spec_url, { headers: { accept: "application/json, application/yaml, text/yaml, */*", "user-agent": "MISSING-Theta3/0.2" } });
   if (!response.ok) throw new Error(`OpenAPI spec request failed with HTTP ${response.status}`);
   const spec = parseSpec(await response.text());
   const selected = selectOperation(spec, lead);
-  if (!selected) return { status: "unsupported", lead, operation: null, candidate: null, missing: ["get_operation"], reason: "No GET operation was found in the OpenAPI document" };
+  if (!selected) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], missing: ["get_operation"], reason: "No GET operation was found in the OpenAPI document" };
 
   const base_url = baseUrlFor(spec, selected.operation);
-  if (!base_url) return { status: "unsupported", lead, operation: null, candidate: null, missing: ["https_base_url"], reason: "Could not derive a static HTTPS base URL" };
+  if (!base_url) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], missing: ["https_base_url"], reason: "Could not derive a static HTTPS base URL" };
 
-  const { path_bindings, query_bindings, inputs } = deriveBindings(spec, selected.pathItem, selected.operation);
+  const { path_bindings, query_bindings, parameters } = deriveBindings(spec, selected.pathItem, selected.operation);
   const { projection, required } = topLevelProjection(spec, responseSchema(spec, selected.operation));
   if (!Object.keys(projection).length) {
     return {
@@ -174,12 +176,14 @@ export async function compileOpenApiLead(
       lead,
       operation: { method: "GET", path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched },
       candidate: null,
+      verification_input_evidence: [],
       missing: ["object_response_projection"],
       reason: "The selected operation does not expose a simple top-level JSON object schema that Theta can project deterministically",
     };
   }
 
-  const verification_inputs = options.verificationInputs ?? [];
+  const harvested = options.verificationInputs === undefined ? harvestVerificationInputs(parameters) : null;
+  const verification_inputs = options.verificationInputs ?? harvested?.inputs ?? [];
   const capability = options.capability ?? `${slug(lead.normalized_intent, "discovered")}_capability`;
   const candidate: SupplyCandidate = {
     candidate_id: candidateId(lead, selected.path),
@@ -199,14 +203,16 @@ export async function compileOpenApiLead(
   };
 
   const missing: string[] = [];
-  if (inputs.length && verification_inputs.length < 2) missing.push("verification_inputs");
-  if (!inputs.length && verification_inputs.length < 2) missing.push("verification_inputs");
+  if (verification_inputs.length < 2) missing.push("verification_inputs");
   return {
     status: missing.length ? "needs_verification_inputs" : "candidate_ready",
     lead,
     operation: { method: "GET", path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched },
     candidate,
+    verification_input_evidence: harvested?.evidence ?? [],
     missing,
-    reason: missing.length ? "Theta requires at least two independent replay inputs before verification; the compiler will not invent them" : null,
+    reason: missing.length
+      ? "Theta requires two independent replay inputs grounded in explicit caller data or OpenAPI examples, enum values, or defaults; MISSING will not invent them"
+      : null,
   };
 }
