@@ -24,6 +24,7 @@ function useTempLedger() {
 
 afterEach(() => {
   delete process.env.MISSING_AGENTRANK_ENABLED;
+  delete process.env.MISSING_AGENTRANK_MIN_OBSERVATIONS;
   configureAgentRankLedger(null);
   resetAgentRankForTest();
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
@@ -38,27 +39,43 @@ describe("MISSING Product Iota AgentRank", () => {
     expect(rankRecipesForExecution(recipes).map(recipe => recipe.provider)).toEqual(recipes.map(recipe => recipe.provider));
 
     const snapshot = agentRankSnapshot(recipes, "country_alpha_metadata");
+    expect(snapshot.minimum_observations).toBe(2);
     expect(snapshot.capabilities[0]?.routing_mode).toBe("registry_order");
     expect(snapshot.capabilities[0]?.rankings.every(item => item.routing_evidence === "cold_start")).toBe(true);
   });
 
-  it("routes toward the provider with stronger observed reliability and latency", () => {
+  it("does not reroute after only one observation per provider", () => {
     useTempLedger();
     const recipes = recipesForCapability("country_alpha_metadata");
     const warnely = recipes.find(recipe => recipe.provider === "Warnely")!;
     const countries = recipes.find(recipe => recipe.provider === "countries.dev")!;
 
-    recordAgentRankAttempt({
-      capability: "country_alpha_metadata",
-      attempt: { provider: warnely.provider, recipe_fingerprint: warnely.recipe_fingerprint, url: "https://example.test/a", ok: false, http_status: 500, latency_ms: 900, error: "HTTP 500" },
-      attemptPosition: 0,
-    });
-    recordAgentRankAttempt({
-      capability: "country_alpha_metadata",
-      attempt: { provider: countries.provider, recipe_fingerprint: countries.recipe_fingerprint, url: "https://example.test/b", ok: true, http_status: 200, latency_ms: 120, error: null },
-      attemptPosition: 1,
-      rescue: true,
-    });
+    recordAgentRankAttempt({ capability: "country_alpha_metadata", attempt: { provider: warnely.provider, recipe_fingerprint: warnely.recipe_fingerprint, url: null, ok: false, http_status: 503, latency_ms: 900, error: "HTTP 503" }, attemptPosition: 0 });
+    recordAgentRankAttempt({ capability: "country_alpha_metadata", attempt: { provider: countries.provider, recipe_fingerprint: countries.recipe_fingerprint, url: null, ok: true, http_status: 200, latency_ms: 120, error: null }, attemptPosition: 1, rescue: true });
+
+    expect(rankRecipesForExecution(recipes).map(recipe => recipe.provider)).toEqual(recipes.map(recipe => recipe.provider));
+    expect(agentRankSnapshot(recipes, "country_alpha_metadata").capabilities[0]?.routing_mode).toBe("registry_order");
+  });
+
+  it("routes toward the provider with stronger mature reliability and latency evidence", () => {
+    useTempLedger();
+    const recipes = recipesForCapability("country_alpha_metadata");
+    const warnely = recipes.find(recipe => recipe.provider === "Warnely")!;
+    const countries = recipes.find(recipe => recipe.provider === "countries.dev")!;
+
+    for (let i = 0; i < 2; i += 1) {
+      recordAgentRankAttempt({
+        capability: "country_alpha_metadata",
+        attempt: { provider: warnely.provider, recipe_fingerprint: warnely.recipe_fingerprint, url: "https://example.test/a", ok: false, http_status: 500, latency_ms: 900, error: "HTTP 500" },
+        attemptPosition: 0,
+      });
+      recordAgentRankAttempt({
+        capability: "country_alpha_metadata",
+        attempt: { provider: countries.provider, recipe_fingerprint: countries.recipe_fingerprint, url: "https://example.test/b", ok: true, http_status: 200, latency_ms: 120, error: null },
+        attemptPosition: 1,
+        rescue: true,
+      });
+    }
 
     const ranked = rankRecipesForExecution(recipes);
     expect(ranked[0]?.provider).toBe("countries.dev");
@@ -66,8 +83,8 @@ describe("MISSING Product Iota AgentRank", () => {
     const snapshot = agentRankSnapshot(recipes, "country_alpha_metadata");
     expect(snapshot.capabilities[0]?.routing_mode).toBe("agentrank");
     expect(snapshot.capabilities[0]?.rankings[0]?.provider).toBe("countries.dev");
-    expect(snapshot.capabilities[0]?.rankings[0]?.evidence.rescue_successes).toBe(1);
-    expect(snapshot.capabilities[0]?.rankings[1]?.evidence.failures).toBe(1);
+    expect(snapshot.capabilities[0]?.rankings[0]?.evidence.rescue_successes).toBe(2);
+    expect(snapshot.capabilities[0]?.rankings[1]?.evidence.failures).toBe(2);
   });
 
   it("rehydrates routing evidence from the durable ledger", () => {
@@ -89,6 +106,7 @@ describe("MISSING Product Iota AgentRank", () => {
     expect(entry?.evidence.observations).toBe(1);
     expect(entry?.evidence.successes).toBe(1);
     expect(entry?.evidence.average_success_latency_ms).toBe(80);
+    expect(snapshot.capabilities[0]?.routing_mode).toBe("registry_order");
   });
 
   it("can be disabled without deleting accumulated evidence", () => {
