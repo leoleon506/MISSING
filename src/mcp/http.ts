@@ -3,9 +3,11 @@ import express, { type Request as ExpressRequest, type Response as ExpressRespon
 import { createServer, type IncomingMessage } from "node:http";
 import { pathToFileURL } from "node:url";
 import { mountA2A } from "../a2a/server.js";
+import { supplyAcquisitionEnabled } from "../runtime/acquisition.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
+import { supplyLedgerPath } from "../runtime/supplyLedger.js";
 import { createProductServer } from "./server.js";
 
 export const productMcpHandler = createMcpHandler(() => createProductServer());
@@ -25,6 +27,8 @@ export function healthPayload() {
     recipe_count: VERIFIED_RECIPES.length,
     transports: ["mcp-streamable-http", "a2a-jsonrpc"],
     demand_persistence: demandLedgerPath() !== null,
+    supply_persistence: supplyLedgerPath() !== null,
+    supply_acquisition_enabled: supplyAcquisitionEnabled(),
     sandbox: sandboxConfig().enabled,
   };
 }
@@ -38,10 +42,13 @@ export function readinessPayload(baseUrl: string) {
     public_url_valid = false;
   }
   const demand_persistence = demandLedgerPath() !== null;
+  const supply_persistence = supplyLedgerPath() !== null;
   return {
-    status: public_url_valid && demand_persistence ? "ready" : "not_ready",
+    status: public_url_valid && demand_persistence && supply_persistence ? "ready" : "not_ready",
     public_url_valid,
     demand_persistence,
+    supply_persistence,
+    supply_acquisition_enabled: supplyAcquisitionEnabled(),
   };
 }
 

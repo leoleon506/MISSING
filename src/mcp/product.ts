@@ -1,10 +1,37 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, supplyAcquisitionEnabled, verifySupplyCandidate } from "../runtime/acquisition.js";
 import { demandSnapshot, demandSummary, recordDemand, searchCapabilities } from "../runtime/discovery.js";
 import { resolveCapability, runtimeHealth } from "../runtime/executor.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 
 const content = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
+const acquisitionDisabled = () => content({
+  status: "disabled",
+  reason: "Supply verification and promotion are disabled on this public runtime. Enable only on a trusted acquisition worker with MISSING_SUPPLY_ACQUISITION_ENABLED=1.",
+});
+
+const projectionRuleSchema = z.union([
+  z.object({ op: z.literal("INPUT"), name: z.string().min(1) }),
+  z.object({ op: z.literal("FIELD"), path: z.string().min(1) }),
+]);
+
+const supplyCandidateSchema = z.object({
+  candidate_id: z.string().min(2).describe("Stable identifier for the provider candidate"),
+  demand_intent: z.string().min(2).describe("Observed agent demand this candidate is intended to satisfy"),
+  capability: z.string().regex(/^[a-z][a-z0-9_]*$/).describe("Proposed lowercase snake_case capability identifier"),
+  family: z.string().min(1),
+  provider: z.string().min(1),
+  evidence_url: z.string().url().describe("Public documentation/evidence URL supporting the candidate mapping"),
+  method: z.literal("GET"),
+  base_url: z.string().url(),
+  path_template: z.string().min(1),
+  path_bindings: z.record(z.string(), z.string()),
+  query_bindings: z.record(z.string(), z.string()),
+  projection: z.record(z.string(), projectionRuleSchema),
+  required: z.array(z.string().min(1)).min(1),
+  verification_inputs: z.array(z.record(z.string(), z.unknown())).min(2).describe("At least two independent inputs that must both replay successfully before promotion"),
+});
 
 export function registerProductTools(server: McpServer) {
   server.registerTool("list_verified_capabilities", {
@@ -33,6 +60,23 @@ export function registerProductTools(server: McpServer) {
     inputSchema: z.object({}),
   }, async () => content({ demand: demandSnapshot(), summary: demandSummary() }));
 
+  server.registerTool("missing_supply_opportunities", {
+    description: "Rank unresolved agent demand as supply-acquisition opportunities. This reports demand only; it never claims that an unverified provider exists.",
+    inputSchema: z.object({
+      limit: z.number().int().min(1).max(50).optional(),
+    }),
+  }, async args => content({ opportunities: rankSupplyOpportunities(args.limit ?? 10) }));
+
+  server.registerTool("verify_supply_candidate", {
+    description: "On a trusted acquisition worker, live-replay a proposed GET provider recipe against at least two verification inputs. Public runtimes keep this disabled by default.",
+    inputSchema: supplyCandidateSchema,
+  }, async args => supplyAcquisitionEnabled() ? content(await verifySupplyCandidate(args)) : acquisitionDisabled());
+
+  server.registerTool("acquire_verified_supply_candidate", {
+    description: "On a trusted acquisition worker, verify a provider candidate and promote it only after every replay gate passes. Public runtimes keep this disabled by default.",
+    inputSchema: supplyCandidateSchema,
+  }, async args => supplyAcquisitionEnabled() ? content(await acquireVerifiedSupplyCandidate(args)) : acquisitionDisabled());
+
   server.registerTool("resolve_capability", {
     description: "Execute a capability using only a replay-verified provider recipe. Returns unavailable rather than inventing an unverified integration.",
     inputSchema: z.object({
@@ -44,5 +88,5 @@ export function registerProductTools(server: McpServer) {
   server.registerTool("missing_runtime_health", {
     description: "Return process-local provider recipe health and circuit-breaker state for the MISSING runtime.",
     inputSchema: z.object({}),
-  }, async () => content({ health: runtimeHealth() }));
+  }, async () => content({ health: runtimeHealth(), supply_acquisition_enabled: supplyAcquisitionEnabled() }));
 }
