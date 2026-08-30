@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, supplyAcquisitionEnabled, verifySupplyCandidate } from "../runtime/acquisition.js";
+import { agentRankSnapshot } from "../runtime/agentRank.js";
 import { demandSnapshot, demandSummary, recordDemand, searchCapabilities } from "../runtime/discovery.js";
 import { resolveCapability, runtimeHealth } from "../runtime/executor.js";
 import { discoverTopSupplyCandidates, providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
@@ -93,12 +94,19 @@ export function registerProductTools(server: McpServer) {
   }, async args => supplyAcquisitionEnabled() ? content(await acquireVerifiedSupplyCandidate(args)) : acquisitionDisabled());
 
   server.registerTool("resolve_capability", {
-    description: "Execute a capability using only a replay-verified provider recipe. Returns unavailable rather than inventing an unverified integration.",
+    description: "Execute a capability using replay-verified provider recipes. When live evidence exists, AgentRank orders eligible providers before failover.",
     inputSchema: z.object({
       capability: z.string().describe("Capability identifier returned by list_verified_capabilities or search_verified_capabilities"),
       input: z.record(z.string(), z.unknown()).describe("Capability-specific input object"),
     }),
   }, async args => content(await resolveCapability(args.capability, args.input)));
+
+  server.registerTool("missing_agent_rank", {
+    description: "Inspect AgentRank provider ordering derived from observed runtime reliability, latency, verification strength, and rescue history. Cost is intentionally excluded until Kappa economics.",
+    inputSchema: z.object({
+      capability: z.string().optional().describe("Optional exact capability identifier; omit to inspect all verified capabilities"),
+    }),
+  }, async args => content(agentRankSnapshot(VERIFIED_RECIPES, args.capability)));
 
   server.registerTool("missing_runtime_health", {
     description: "Return process-local provider recipe health and circuit-breaker state for the MISSING runtime.",
