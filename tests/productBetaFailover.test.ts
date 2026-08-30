@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { configureAgentRankLedger, resetAgentRankForTest } from "../src/runtime/agentRank.js";
 import { resolveCapability, resetRuntimeHealth, runtimeHealth } from "../src/runtime/executor.js";
 import { recipesForCapability } from "../src/runtime/recipes.js";
 
@@ -8,8 +9,16 @@ const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringif
 });
 
 describe("Product Beta provider failover", () => {
-  beforeEach(() => resetRuntimeHealth());
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => {
+    resetRuntimeHealth();
+    configureAgentRankLedger(null);
+    resetAgentRankForTest();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    configureAgentRankLedger(null);
+    resetAgentRankForTest();
+  });
 
   it("registers an independent backup for country_alpha_metadata", () => {
     const recipes = recipesForCapability("country_alpha_metadata");
