@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { demandLedgerPath } from "./demandLedger.js";
 import type { VerifiedRecipe } from "./types.js";
 
 export interface SupplyLedgerEvent {
@@ -12,12 +13,11 @@ let overridePath: string | null | undefined;
 
 export function supplyLedgerPath(): string | null {
   if (overridePath !== undefined) return overridePath;
-  if (process.env.NODE_ENV === "test" && !process.env.MISSING_SUPPLY_LEDGER) return null;
-  const configured = process.env.MISSING_SUPPLY_LEDGER
-    ?? (process.env.MISSING_DEMAND_LEDGER
-      ? join(dirname(resolve(process.env.MISSING_DEMAND_LEDGER)), "supply.jsonl")
-      : ".missing/supply.jsonl");
-  return resolve(configured);
+  if (process.env.MISSING_SUPPLY_LEDGER) return resolve(process.env.MISSING_SUPPLY_LEDGER);
+  const demandPath = demandLedgerPath();
+  if (demandPath) return join(dirname(demandPath), "supply.jsonl");
+  if (process.env.NODE_ENV === "test") return null;
+  return resolve(".missing/supply.jsonl");
 }
 
 export function configureSupplyLedger(path: string | null | undefined) {
