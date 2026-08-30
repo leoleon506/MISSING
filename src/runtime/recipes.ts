@@ -41,7 +41,7 @@ export const VERIFIED_RECIPES: VerifiedRecipe[] = [
     required: ["country_code", "country_name", "region"], example_input: { country_code: "JP" },
   }, {
     verification_inputs: [{ country_code: "JP" }, { country_code: "US" }],
-    verified_at: "2026-08-30T04:58:00Z",
+    verified_at: "2026-08-30",
     evidence_url: "https://countries.dev/docs/api/alpha",
   }),
   verified({
@@ -62,7 +62,7 @@ export const VERIFIED_RECIPES: VerifiedRecipe[] = [
   }),
   verified({
     capability: "television_show_metadata", family: "media", provider: "TVMaze",
-    provider_candidate_id: "r2016_7cbffced6f", recipe_fingerprint: "c9a3689afc5f27d5962d81fcb83d281da715134179e9b91da7e68138178b10",
+    provider_candidate_id: "r2016_7cbffced6f", recipe_fingerprint: "c9a3689afc5f27d5962d81fcb83d281da715134ac179e9b91da7e68138178b10",
     method: "GET", base_url: "https://api.tvmaze.com", path_template: "/search/shows?q=girls",
     path_bindings: {}, query_bindings: { q: "$input.show_name" },
     projection: { name: { op: "INPUT", name: "show_name" }, premiered: { op: "FIELD", path: "0.show.premiered" }, id: { op: "FIELD", path: "0.show.id" } },
