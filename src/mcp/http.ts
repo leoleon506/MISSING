@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { mountA2A } from "../a2a/server.js";
 import { supplyAcquisitionEnabled } from "../runtime/acquisition.js";
 import { agentRankEnabled, agentRankExplorationEnabled, agentRankLedgerPath } from "../runtime/agentRank.js";
+import { agentPaymentsSnapshot, handleAgentPaidResolution } from "../runtime/agentPayments.js";
 import { authorizeControlPlane, controlPlaneCycleOptions, controlPlaneEnabled } from "../runtime/controlPlane.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
 import { economicsEnforcementEnabled, economicsLedgerPath } from "../runtime/economics.js";
@@ -31,7 +32,7 @@ export function healthPayload() {
     version: "0.2.0",
     capability_count: new Set(VERIFIED_RECIPES.map(recipe => recipe.capability)).size,
     recipe_count: VERIFIED_RECIPES.length,
-    transports: ["mcp-streamable-http", "a2a-jsonrpc"],
+    transports: ["mcp-streamable-http", "a2a-jsonrpc", "x402-http"],
     demand_persistence: demandLedgerPath() !== null,
     supply_persistence: supplyLedgerPath() !== null,
     agentrank_enabled: agentRankEnabled(),
@@ -39,6 +40,7 @@ export function healthPayload() {
     agentrank_persistence: agentRankLedgerPath() !== null,
     economics_enforcement_enabled: economicsEnforcementEnabled(),
     economics_persistence: economicsLedgerPath() !== null,
+    agent_payments: agentPaymentsSnapshot(),
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
@@ -70,6 +72,7 @@ export function readinessPayload(baseUrl: string) {
     agentrank_persistence,
     economics_enforcement_enabled: economicsEnforcementEnabled(),
     economics_persistence,
+    agent_payments: agentPaymentsSnapshot(),
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
@@ -124,6 +127,22 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
   });
 
   app.use(sandboxMiddleware);
+
+  app.post("/v1/agent/resolve", express.json({ limit: "64kb" }), async (req: ExpressRequest, res: ExpressResponse) => {
+    try {
+      const resourceUrl = `${baseUrl.replace(/\/$/, "")}/v1/agent/resolve`;
+      const result = await handleAgentPaidResolution({
+        request: req.body,
+        paymentSignature: req.get("PAYMENT-SIGNATURE"),
+        resourceUrl,
+      });
+      if (result.headers) for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
+      res.status(result.status).json(result.body);
+    } catch (error) {
+      process.stderr.write(`agent payment request failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
 
   app.all("/mcp", async (req: ExpressRequest, res: ExpressResponse) => {
     try {
@@ -186,6 +205,7 @@ export async function serveHttp() {
   });
   process.stdout.write(`MISSING remote MCP listening on ${resolvedPublicBaseUrl}/mcp\n`);
   process.stdout.write(`MISSING A2A Agent Card on ${resolvedPublicBaseUrl}/.well-known/agent-card.json\n`);
+  process.stdout.write(`MISSING x402 paid capability endpoint on ${resolvedPublicBaseUrl}/v1/agent/resolve\n`);
   process.stdout.write(`MISSING sandbox status on ${resolvedPublicBaseUrl}/sandboxz\n`);
 }
 
