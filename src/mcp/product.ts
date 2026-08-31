@@ -2,7 +2,6 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, supplyAcquisitionEnabled, verifySupplyCandidate } from "../runtime/acquisition.js";
 import { agentRankSnapshot } from "../runtime/agentRank.js";
-import { chargingSnapshot, quoteCapability, resolveCapabilityCharged } from "../runtime/charging.js";
 import { demandSnapshot, demandSummary, recordDemand, searchCapabilities } from "../runtime/discovery.js";
 import { economicsSnapshot } from "../runtime/economics.js";
 import { resolveCapability, runtimeHealth } from "../runtime/executor.js";
@@ -46,25 +45,8 @@ export function registerProductTools(server: McpServer) {
 
   server.registerTool("missing_economics", { description: "Inspect Kappa provider economics and durable resolution metering.", inputSchema: z.object({ capability: z.string().optional() }) }, async args => content(economicsSnapshot(VERIFIED_RECIPES, args.capability)));
 
-  server.registerTool("missing_charge_quote", { description: "Quote the explicit customer price for a capability before charged execution.", inputSchema: z.object({ capability: z.string().min(1) }) }, async args => content(quoteCapability(args.capability)));
-
-  server.registerTool("resolve_capability_charged", {
-    description: "Execute a capability through Kappa transactional charging. When prepaid credits are enabled, account_id is required and credits are reserved before provider execution, committed on success, and released on failure.",
-    inputSchema: z.object({
-      idempotency_key: z.string().min(1),
-      account_id: z.string().min(1).optional(),
-      capability: z.string().min(1),
-      input: z.record(z.string(), z.unknown()),
-    }),
-  }, async args => content(await resolveCapabilityCharged({ idempotencyKey: args.idempotency_key, accountId: args.account_id, capability: args.capability, input: args.input })));
-
-  server.registerTool("missing_charging_snapshot", { description: "Inspect Kappa transactional charging totals including committed revenue, provider cost, and gross margin.", inputSchema: z.object({}) }, async () => content(chargingSnapshot()));
-
   server.registerTool("missing_prepaid_credits", { description: "Inspect MISSING prepaid credit balances. Credits are internal service credits, not a general-purpose transferable wallet.", inputSchema: z.object({ account_id: z.string().min(1).optional() }) }, async args => content(prepaidCreditsSnapshot(args.account_id)));
 
-  // Administrative funding must not appear on the public MCP surface unless a
-  // trusted environment explicitly opts in. Stripe funding will call the
-  // underlying creditAccount primitive directly rather than expose this tool.
   if (process.env.MISSING_MANUAL_CREDIT_ENABLED === "1") {
     server.registerTool("missing_credit_account", {
       description: "Administrative test/bootstrap credit operation for controlled environments only.",
