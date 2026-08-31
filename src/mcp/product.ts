@@ -3,6 +3,7 @@ import { z } from "zod";
 import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, supplyAcquisitionEnabled, verifySupplyCandidate } from "../runtime/acquisition.js";
 import { agentRankSnapshot } from "../runtime/agentRank.js";
 import { demandSnapshot, demandSummary, recordDemand, searchCapabilities } from "../runtime/discovery.js";
+import { economicsSnapshot } from "../runtime/economics.js";
 import { resolveCapability, runtimeHealth } from "../runtime/executor.js";
 import { discoverTopSupplyCandidates, providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
@@ -94,7 +95,7 @@ export function registerProductTools(server: McpServer) {
   }, async args => supplyAcquisitionEnabled() ? content(await acquireVerifiedSupplyCandidate(args)) : acquisitionDisabled());
 
   server.registerTool("resolve_capability", {
-    description: "Execute a capability using replay-verified provider recipes. When live evidence exists, AgentRank orders eligible providers before failover.",
+    description: "Execute a capability using replay-verified provider recipes. AgentRank orders by observed quality; when Kappa enforcement is enabled, explicit economics policy is then applied before failover.",
     inputSchema: z.object({
       capability: z.string().describe("Capability identifier returned by list_verified_capabilities or search_verified_capabilities"),
       input: z.record(z.string(), z.unknown()).describe("Capability-specific input object"),
@@ -102,11 +103,18 @@ export function registerProductTools(server: McpServer) {
   }, async args => content(await resolveCapability(args.capability, args.input)));
 
   server.registerTool("missing_agent_rank", {
-    description: "Inspect AgentRank provider ordering derived from observed runtime reliability, latency, verification strength, and rescue history. Cost is intentionally excluded until Kappa economics.",
+    description: "Inspect AgentRank provider ordering derived from observed runtime reliability, latency, verification strength, and rescue history. Economic policy is exposed separately by missing_economics.",
     inputSchema: z.object({
       capability: z.string().optional().describe("Optional exact capability identifier; omit to inspect all verified capabilities"),
     }),
   }, async args => content(agentRankSnapshot(VERIFIED_RECIPES, args.capability)));
+
+  server.registerTool("missing_economics", {
+    description: "Inspect Kappa provider economics and durable resolution metering. Unknown economics are never treated as zero cost. Money is reported in integer micro-USD (1 USD = 1,000,000 micro-USD).",
+    inputSchema: z.object({
+      capability: z.string().optional().describe("Optional exact capability identifier; omit to inspect all verified recipes"),
+    }),
+  }, async args => content(economicsSnapshot(VERIFIED_RECIPES, args.capability)));
 
   server.registerTool("missing_runtime_health", {
     description: "Return process-local provider recipe health and circuit-breaker state for the MISSING runtime.",

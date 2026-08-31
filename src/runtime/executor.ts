@@ -1,4 +1,5 @@
 import { rankRecipesForExecution, recordAgentRankAttempt, selectAgentRankExplorationRecipe } from "./agentRank.js";
+import { economicsEnforcementEnabled, rankRecipesByEconomics, recordEconomicsResolution } from "./economics.js";
 import { recipesForCapability } from "./recipes.js";
 import type { ResolveResult, RuntimeAttempt, RuntimeHealth, RuntimeInput, VerifiedRecipe } from "./types.js";
 
@@ -73,7 +74,7 @@ export function projectRecipeOutput(recipe: VerifiedRecipe, input: RuntimeInput,
 }
 
 /**
- * Execute exactly one recipe without touching circuit-breaker or AgentRank state.
+ * Execute exactly one recipe without touching circuit-breaker, AgentRank, or Kappa state.
  * Product Theta uses this primitive to verify supply candidates before they
  * are eligible for registration in the executable recipe registry.
  */
@@ -114,12 +115,13 @@ function markFailure(recipe: VerifiedRecipe) {
 }
 
 function scheduleAgentRankExploration(capability: string, registered: VerifiedRecipe[], selectedRecipe: VerifiedRecipe, timeoutMs: number) {
-  const explorationRecipe = selectAgentRankExplorationRecipe(registered, selectedRecipe.recipe_fingerprint);
+  const explorationPool = economicsEnforcementEnabled() ? rankRecipesByEconomics(registered) : registered;
+  const explorationRecipe = selectAgentRankExplorationRecipe(explorationPool, selectedRecipe.recipe_fingerprint);
   if (!explorationRecipe || explorationInFlight.has(explorationRecipe.recipe_fingerprint)) return;
   explorationInFlight.add(explorationRecipe.recipe_fingerprint);
 
-  // Privacy boundary: shadow probes use only the recipe's already-verified example input.
-  // User inputs and outputs are never copied to an alternate provider for exploration.
+  // Privacy + economics boundary: shadow probes use only verified example input
+  // and, when Kappa enforcement is active, only economically eligible providers.
   void attemptRecipe(explorationRecipe, explorationRecipe.example_input, timeoutMs)
     .then(result => {
       recordAgentRankAttempt({
@@ -142,7 +144,17 @@ export async function resolveCapability(capability: string, input: RuntimeInput,
   if (!registered.length) return { status: "unavailable", capability, reason: "No replay-verified recipe is registered for this capability", attempts: [] };
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const recipes = rankRecipesForExecution(registered);
+  const agentRankOrdered = rankRecipesForExecution(registered);
+  const recipes = rankRecipesByEconomics(agentRankOrdered);
+  if (!recipes.length && economicsEnforcementEnabled()) {
+    return {
+      status: "unavailable",
+      capability,
+      reason: "No replay-verified provider satisfies the configured Kappa economics policy",
+      attempts: [],
+    };
+  }
+
   const attempts: RuntimeAttempt[] = [];
   for (const recipe of recipes) {
     if (stateFor(recipe).state === "open") continue;
@@ -152,6 +164,7 @@ export async function resolveCapability(capability: string, input: RuntimeInput,
     recordAgentRankAttempt({ capability, attempt: result.attempt, attemptPosition, rescue: attemptPosition > 0 && Boolean(result.output) });
     if (result.output) {
       markSuccess(recipe);
+      recordEconomicsResolution({ capability, recipe });
       scheduleAgentRankExploration(capability, registered, recipe, timeoutMs);
       return { status: "resolved", capability, provider: recipe.provider, recipe_fingerprint: recipe.recipe_fingerprint, output: result.output, attempts };
     }
