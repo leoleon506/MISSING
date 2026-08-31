@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { rankRecipesForExecution } from "./agentRank.js";
 import { economicsLedgerPath, economicsMinMarginMicrousd, recipeEconomics, recordEconomicsResolution } from "./economics.js";
 import { resolveCapability } from "./executor.js";
+import { commitCredits, prepaidCreditsEnabled, releaseCredits, reserveCredits } from "./prepaidCredits.js";
 import { recipesForCapability, VERIFIED_RECIPES } from "./recipes.js";
 import type { ResolveResult, RuntimeInput, VerifiedRecipe } from "./types.js";
 
@@ -22,6 +23,7 @@ export interface ChargeEvent {
   provider_cost_microusd: number | null;
   gross_margin_microusd: number | null;
   reason: string | null;
+  account_id?: string | null;
 }
 
 let overrideLedgerPath: string | null | undefined;
@@ -64,7 +66,8 @@ function validEvent(value: unknown): value is ChargeEvent {
     && typeof e.idempotency_hash === "string"
     && (e.state === "reserved" || e.state === "committed" || e.state === "voided")
     && typeof e.capability === "string"
-    && Number.isSafeInteger(e.customer_price_microusd) && (e.customer_price_microusd ?? -1) >= 0;
+    && Number.isSafeInteger(e.customer_price_microusd) && (e.customer_price_microusd ?? -1) >= 0
+    && (e.account_id === undefined || e.account_id === null || typeof e.account_id === "string");
 }
 
 export function chargeEvents(): ChargeEvent[] {
@@ -127,10 +130,11 @@ export function quoteCapability(capability: string) {
 
 export async function resolveCapabilityCharged(args: {
   idempotencyKey: string;
+  accountId?: string;
   capability: string;
   input: RuntimeInput;
 }): Promise<{
-  status: "resolved" | "unavailable" | "provider_error" | "already_committed" | "already_voided" | "in_progress" | "charging_disabled" | "pricing_conflict";
+  status: "resolved" | "unavailable" | "provider_error" | "already_committed" | "already_voided" | "in_progress" | "charging_disabled" | "pricing_conflict" | "insufficient_credits";
   transaction_id?: string;
   customer_price_microusd?: number;
   charge_state?: ChargeState;
@@ -139,6 +143,7 @@ export async function resolveCapabilityCharged(args: {
 }> {
   if (!transactionalChargingEnabled()) return { status: "charging_disabled", reason: "Set MISSING_TRANSACTIONAL_CHARGING_ENABLED=1 to enable transactional charging" };
   if (!args.idempotencyKey.trim()) return { status: "unavailable", reason: "A non-empty idempotency key is required" };
+  if (prepaidCreditsEnabled() && !args.accountId?.trim()) return { status: "unavailable", reason: "account_id is required when prepaid credits are enabled" };
 
   const quote = quoteCapability(args.capability);
   if (quote.status !== "quoted") return { status: quote.status, reason: quote.reason };
@@ -179,13 +184,29 @@ export async function resolveCapabilityCharged(args: {
     provider_cost_microusd: null,
     gross_margin_microusd: null,
     reason: null,
+    account_id: args.accountId ?? null,
   };
   appendEvent(reserved);
-  inFlight.add(hash);
 
+  if (prepaidCreditsEnabled()) {
+    const reservedCredits = reserveCredits({ accountId: args.accountId!, transactionId, amountMicrousd: quote.customer_price_microusd });
+    if (!reservedCredits) {
+      appendEvent({ ...reserved, observed_at: new Date().toISOString(), state: "voided", reason: "Insufficient prepaid credits" });
+      return {
+        status: "insufficient_credits",
+        transaction_id: transactionId,
+        customer_price_microusd: quote.customer_price_microusd,
+        charge_state: "voided",
+        reason: "Insufficient prepaid credits",
+      };
+    }
+  }
+
+  inFlight.add(hash);
   try {
     const resolution = await resolveCapability(args.capability, args.input, { meterEconomics: false });
     if (resolution.status !== "resolved") {
+      if (prepaidCreditsEnabled()) releaseCredits({ accountId: args.accountId!, transactionId, amountMicrousd: quote.customer_price_microusd });
       appendEvent({ ...reserved, observed_at: new Date().toISOString(), state: "voided", reason: resolution.reason });
       return {
         status: resolution.status,
@@ -200,6 +221,7 @@ export async function resolveCapabilityCharged(args: {
     const recipe = VERIFIED_RECIPES.find(item => item.recipe_fingerprint === resolution.recipe_fingerprint);
     const economics = recipe ? recipeEconomics(recipe) : null;
     if (!recipe || !economics || economics.customer_price_microusd !== quote.customer_price_microusd) {
+      if (prepaidCreditsEnabled()) releaseCredits({ accountId: args.accountId!, transactionId, amountMicrousd: quote.customer_price_microusd });
       appendEvent({ ...reserved, observed_at: new Date().toISOString(), state: "voided", reason: "Resolved provider no longer matches the authorized quote" });
       return {
         status: "unavailable",
@@ -211,6 +233,7 @@ export async function resolveCapabilityCharged(args: {
       };
     }
 
+    if (prepaidCreditsEnabled()) commitCredits({ accountId: args.accountId!, transactionId, amountMicrousd: quote.customer_price_microusd });
     recordEconomicsResolution({ capability: args.capability, recipe });
     appendEvent({
       ...reserved,
