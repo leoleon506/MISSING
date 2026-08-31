@@ -139,7 +139,11 @@ function scheduleAgentRankExploration(capability: string, registered: VerifiedRe
     .finally(() => explorationInFlight.delete(explorationRecipe.recipe_fingerprint));
 }
 
-export async function resolveCapability(capability: string, input: RuntimeInput, options: { timeoutMs?: number } = {}): Promise<ResolveResult> {
+export async function resolveCapability(
+  capability: string,
+  input: RuntimeInput,
+  options: { timeoutMs?: number; meterEconomics?: boolean } = {},
+): Promise<ResolveResult> {
   const registered = recipesForCapability(capability);
   if (!registered.length) return { status: "unavailable", capability, reason: "No replay-verified recipe is registered for this capability", attempts: [] };
 
@@ -164,7 +168,7 @@ export async function resolveCapability(capability: string, input: RuntimeInput,
     recordAgentRankAttempt({ capability, attempt: result.attempt, attemptPosition, rescue: attemptPosition > 0 && Boolean(result.output) });
     if (result.output) {
       markSuccess(recipe);
-      recordEconomicsResolution({ capability, recipe });
+      if (options.meterEconomics !== false) recordEconomicsResolution({ capability, recipe });
       scheduleAgentRankExploration(capability, registered, recipe, timeoutMs);
       return { status: "resolved", capability, provider: recipe.provider, recipe_fingerprint: recipe.recipe_fingerprint, output: result.output, attempts };
     }
