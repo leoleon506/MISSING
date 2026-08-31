@@ -62,12 +62,15 @@ export function registerProductTools(server: McpServer) {
 
   server.registerTool("missing_prepaid_credits", { description: "Inspect MISSING prepaid credit balances. Credits are internal service credits, not a general-purpose transferable wallet.", inputSchema: z.object({ account_id: z.string().min(1).optional() }) }, async args => content(prepaidCreditsSnapshot(args.account_id)));
 
-  server.registerTool("missing_credit_account", {
-    description: "Administrative test/bootstrap credit operation. Disabled unless MISSING_MANUAL_CREDIT_ENABLED=1. Production funding should come from a verified payment webhook such as Stripe.",
-    inputSchema: z.object({ account_id: z.string().min(1), amount_microusd: z.number().int().positive(), external_reference: z.string().min(1) }),
-  }, async args => process.env.MISSING_MANUAL_CREDIT_ENABLED === "1"
-    ? content(creditAccount({ accountId: args.account_id, amountMicrousd: args.amount_microusd, externalReference: args.external_reference }))
-    : content({ status: "disabled", reason: "Manual credits are disabled; use a trusted funding adapter or set MISSING_MANUAL_CREDIT_ENABLED=1 only for controlled testing." }));
+  // Administrative funding must not appear on the public MCP surface unless a
+  // trusted environment explicitly opts in. Stripe funding will call the
+  // underlying creditAccount primitive directly rather than expose this tool.
+  if (process.env.MISSING_MANUAL_CREDIT_ENABLED === "1") {
+    server.registerTool("missing_credit_account", {
+      description: "Administrative test/bootstrap credit operation for controlled environments only.",
+      inputSchema: z.object({ account_id: z.string().min(1), amount_microusd: z.number().int().min(1), external_reference: z.string().min(1) }),
+    }, async args => content(creditAccount({ accountId: args.account_id, amountMicrousd: args.amount_microusd, externalReference: args.external_reference })));
+  }
 
   server.registerTool("missing_runtime_health", { description: "Return process-local provider recipe health and circuit-breaker state.", inputSchema: z.object({}) }, async () => content({ health: runtimeHealth(), supply_acquisition_enabled: supplyAcquisitionEnabled(), provider_discovery_enabled: providerDiscoveryEnabled() }));
 }
