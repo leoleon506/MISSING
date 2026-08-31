@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { chargingLedgerPath } from "./charging.js";
+import { economicsLedgerPath } from "./economics.js";
 
 export type CreditEventType = "credit" | "reserve" | "commit" | "release";
 
@@ -41,8 +41,8 @@ export function prepaidCreditsEnabled(): boolean {
 export function prepaidCreditLedgerPath(): string | null {
   if (overrideLedgerPath !== undefined) return overrideLedgerPath;
   if (process.env.MISSING_PREPAID_CREDIT_LEDGER) return resolve(process.env.MISSING_PREPAID_CREDIT_LEDGER);
-  const chargingPath = chargingLedgerPath();
-  if (chargingPath) return join(dirname(chargingPath), "credits.jsonl");
+  const economicsPath = economicsLedgerPath();
+  if (economicsPath) return join(dirname(economicsPath), "credits.jsonl");
   if (process.env.NODE_ENV === "test") return null;
   return resolve(".missing/credits.jsonl");
 }
@@ -113,23 +113,10 @@ export function creditBalance(accountId: string): CreditBalance {
 
 export function creditAccount(args: { accountId: string; amountMicrousd: number; externalReference: string }): { credited: boolean; balance: CreditBalance } {
   if (!prepaidCreditsEnabled()) return { credited: false, balance: creditBalance(args.accountId) };
-  if (!args.accountId.trim() || !validMoney(args.amountMicrousd) || args.amountMicrousd === 0 || !args.externalReference.trim()) {
-    return { credited: false, balance: creditBalance(args.accountId) };
-  }
+  if (!args.accountId.trim() || !validMoney(args.amountMicrousd) || args.amountMicrousd === 0 || !args.externalReference.trim()) return { credited: false, balance: creditBalance(args.accountId) };
   const hash = refHash(args.externalReference);
   const duplicate = creditEvents().some(event => event.type === "credit" && event.account_id === args.accountId && event.external_reference_hash === hash);
-  if (!duplicate) {
-    appendEvent({
-      version: 1,
-      observed_at: new Date().toISOString(),
-      event_id: randomUUID(),
-      account_id: args.accountId,
-      type: "credit",
-      amount_microusd: args.amountMicrousd,
-      transaction_id: null,
-      external_reference_hash: hash,
-    });
-  }
+  if (!duplicate) appendEvent({ version: 1, observed_at: new Date().toISOString(), event_id: randomUUID(), account_id: args.accountId, type: "credit", amount_microusd: args.amountMicrousd, transaction_id: null, external_reference_hash: hash });
   return { credited: !duplicate, balance: creditBalance(args.accountId) };
 }
 
@@ -159,11 +146,7 @@ export function releaseCredits(args: { accountId: string; transactionId: string;
 export function prepaidCreditsSnapshot(accountId?: string) {
   const accounts = [...new Set(creditEvents().map(event => event.account_id))];
   const selected = accountId ? accounts.filter(id => id === accountId) : accounts;
-  return {
-    enabled: prepaidCreditsEnabled(),
-    ledger_persistence: prepaidCreditLedgerPath() !== null,
-    accounts: selected.map(creditBalance),
-  };
+  return { enabled: prepaidCreditsEnabled(), ledger_persistence: prepaidCreditLedgerPath() !== null, accounts: selected.map(creditBalance) };
 }
 
 export function truncatePrepaidCreditLedger() {
