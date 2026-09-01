@@ -20,17 +20,32 @@ export type RecipeVerification =
       evidence_url: string;
     };
 
+export type HttpMethod = "GET" | "POST";
+
+export interface CredentialBinding {
+  location: "header";
+  name: string;
+  credential_key: string;
+  prefix?: string;
+}
+
 export interface VerifiedRecipe {
   capability: string;
   family: string;
   provider: string;
   provider_candidate_id: string;
   recipe_fingerprint: string;
-  method: "GET";
+  method: HttpMethod;
   base_url: string;
   path_template: string;
   path_bindings: Record<string, string>;
   query_bindings: Record<string, string>;
+  /** Top-level JSON request body field -> $input binding. POST only. */
+  body_bindings?: Record<string, string>;
+  /** Non-sensitive declarative headers. Secrets must use credential_bindings. */
+  static_headers?: Record<string, string>;
+  /** References to credentials resolved only at execution time. */
+  credential_bindings?: CredentialBinding[];
   projection: Record<string, ProjectionRule>;
   required: string[];
   example_input: RuntimeInput;
