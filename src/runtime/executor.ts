@@ -1,4 +1,5 @@
 import { rankRecipesForExecution, recordAgentRankAttempt, selectAgentRankExplorationRecipe } from "./agentRank.js";
+import { credentialValue } from "./credentials.js";
 import { economicsEnforcementEnabled, rankRecipesByEconomics, recordEconomicsResolution } from "./economics.js";
 import { recordProviderAttemptCost } from "./providerCostLedger.js";
 import { recipesForCapability } from "./recipes.js";
@@ -10,6 +11,17 @@ const OPEN_MS = 60_000;
 
 const health = new Map<string, RuntimeHealth>();
 const explorationInFlight = new Set<string>();
+
+const FORBIDDEN_STATIC_HEADERS = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "host",
+  "content-length",
+  "connection",
+  "transfer-encoding",
+]);
 
 function stateFor(recipe: VerifiedRecipe): RuntimeHealth {
   const existing = health.get(recipe.recipe_fingerprint);
@@ -54,6 +66,62 @@ export function renderRecipeUrl(recipe: VerifiedRecipe, input: RuntimeInput): st
   return url.toString();
 }
 
+function validateStaticHeaderName(name: string) {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized || !/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(normalized)) throw new Error(`Invalid static header name: ${name}`);
+  if (FORBIDDEN_STATIC_HEADERS.has(normalized) || /(?:api[-_]?key|token|secret)/i.test(normalized)) {
+    throw new Error(`Sensitive or transport-controlled header must use a credential binding: ${name}`);
+  }
+  return normalized;
+}
+
+function renderHeaders(recipe: VerifiedRecipe): Record<string, string> {
+  const headers: Record<string, string> = { accept: "application/json" };
+  for (const [name, value] of Object.entries(recipe.static_headers ?? {})) {
+    const normalized = validateStaticHeaderName(name);
+    if (typeof value !== "string" || !value.trim()) throw new Error(`Invalid static header value: ${name}`);
+    headers[normalized] = value;
+  }
+  for (const binding of recipe.credential_bindings ?? []) {
+    if (binding.location !== "header" || !binding.name.trim() || !binding.credential_key.trim()) throw new Error("Invalid credential binding");
+    const normalized = binding.name.trim().toLowerCase();
+    if (!/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(normalized)) throw new Error(`Invalid credential header name: ${binding.name}`);
+    const secret = credentialValue(binding.credential_key);
+    if (!secret) throw new Error(`Missing runtime credential: ${binding.credential_key}`);
+    headers[normalized] = `${binding.prefix ?? ""}${secret}`;
+  }
+  return headers;
+}
+
+function renderJsonBody(recipe: VerifiedRecipe, input: RuntimeInput): string | undefined {
+  const bindings = recipe.body_bindings ?? {};
+  if (recipe.method === "GET") {
+    if (Object.keys(bindings).length) throw new Error("GET recipes cannot define body_bindings");
+    return undefined;
+  }
+  const body: Record<string, unknown> = {};
+  for (const [field, ref] of Object.entries(bindings)) {
+    if (!field.trim()) throw new Error("POST body binding field cannot be empty");
+    body[field] = bindingValue(ref, input);
+  }
+  return JSON.stringify(body);
+}
+
+export function renderRecipeRequest(recipe: VerifiedRecipe, input: RuntimeInput): { url: string; init: RequestInit } {
+  const url = renderRecipeUrl(recipe, input);
+  const headers = renderHeaders(recipe);
+  const body = renderJsonBody(recipe, input);
+  if (recipe.method === "POST") headers["content-type"] = "application/json";
+  return {
+    url,
+    init: {
+      method: recipe.method,
+      headers,
+      body,
+    },
+  };
+}
+
 function readPath(value: unknown, path: string): unknown {
   let cursor: any = value;
   for (const part of path.split(".")) {
@@ -74,13 +142,14 @@ export function projectRecipeOutput(recipe: VerifiedRecipe, input: RuntimeInput,
   return output;
 }
 
-/** Execute one recipe without mutating product routing state. */
+/** Execute one replay-verified recipe without mutating product routing state. */
 export async function attemptRecipe(recipe: VerifiedRecipe, input: RuntimeInput, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<{ attempt: RuntimeAttempt; output?: Record<string, unknown> }> {
   const started = Date.now();
   let url: string | null = null;
   try {
-    url = renderRecipeUrl(recipe, input);
-    const response = await fetch(url, { method: recipe.method, signal: AbortSignal.timeout(timeoutMs), headers: { accept: "application/json" } });
+    const rendered = renderRecipeRequest(recipe, input);
+    url = rendered.url;
+    const response = await fetch(url, { ...rendered.init, signal: AbortSignal.timeout(timeoutMs) });
     const latency_ms = Date.now() - started;
     if (!response.ok) return { attempt: { provider: recipe.provider, recipe_fingerprint: recipe.recipe_fingerprint, url, ok: false, http_status: response.status, latency_ms, error: `HTTP ${response.status}` } };
     const text = await response.text();
@@ -112,7 +181,9 @@ function markFailure(recipe: VerifiedRecipe) {
 }
 
 function scheduleAgentRankExploration(capability: string, registered: VerifiedRecipe[], selectedRecipe: VerifiedRecipe, timeoutMs: number) {
-  const explorationPool = economicsEnforcementEnabled() ? rankRecipesByEconomics(registered) : registered;
+  // Exploration must stay side-effect free. POST recipes are only executed for an explicit routed request.
+  const safeRegistered = registered.filter(recipe => recipe.method === "GET");
+  const explorationPool = economicsEnforcementEnabled() ? rankRecipesByEconomics(safeRegistered) : safeRegistered;
   const explorationRecipe = selectAgentRankExplorationRecipe(explorationPool, selectedRecipe.recipe_fingerprint);
   if (!explorationRecipe || explorationInFlight.has(explorationRecipe.recipe_fingerprint)) return;
   explorationInFlight.add(explorationRecipe.recipe_fingerprint);
