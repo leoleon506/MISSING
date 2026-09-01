@@ -80,7 +80,7 @@ function validEvent(value: unknown): value is ProviderCostEvent {
     && typeof e.recipe_fingerprint === "string"
     && (e.source === "routing" || e.source === "exploration")
     && (e.outcome === "success" || e.outcome === "failure")
-    && (e.provider_cost_microusd === null || (Number.isSafeInteger(e.provider_cost_microusd) && e.provider_cost_microusd >= 0))
+    && (e.provider_cost_microusd === null || (typeof e.provider_cost_microusd === "number" && Number.isSafeInteger(e.provider_cost_microusd) && e.provider_cost_microusd >= 0))
     && typeof e.customer_billable === "boolean";
 }
 
