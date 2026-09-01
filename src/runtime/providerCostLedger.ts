@@ -102,11 +102,14 @@ export function providerCostEvents(): ProviderCostEvent[] {
 export function providerCostForExecution(executionId: string) {
   const events = providerCostEvents().filter(event => event.execution_id === executionId && event.source === "routing");
   const known = events.filter(event => event.provider_cost_microusd !== null);
+  const unknownCostAttempts = events.length - known.length;
   return {
     attempts: events.length,
     known_cost_attempts: known.length,
-    unknown_cost_attempts: events.length - known.length,
-    provider_cost_microusd: known.reduce((sum, event) => sum + (event.provider_cost_microusd ?? 0), 0),
+    unknown_cost_attempts: unknownCostAttempts,
+    provider_cost_microusd: unknownCostAttempts > 0
+      ? null
+      : known.reduce((sum, event) => sum + (event.provider_cost_microusd ?? 0), 0),
   };
 }
 
@@ -119,8 +122,8 @@ export function providerCostSnapshot() {
     ledger_persistence: providerCostLedgerPath() !== null,
     routing_attempts: routing.length,
     exploration_attempts: exploration.length,
-    routing_provider_cost_microusd: sumKnown(routing),
-    exploration_provider_cost_microusd: sumKnown(exploration),
+    routing_known_provider_cost_microusd: sumKnown(routing),
+    exploration_known_provider_cost_microusd: sumKnown(exploration),
     unknown_cost_attempts: events.filter(event => event.provider_cost_microusd === null).length,
   };
 }
