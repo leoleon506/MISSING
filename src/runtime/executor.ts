@@ -1,5 +1,6 @@
 import { rankRecipesForExecution, recordAgentRankAttempt, selectAgentRankExplorationRecipe } from "./agentRank.js";
 import { economicsEnforcementEnabled, rankRecipesByEconomics, recordEconomicsResolution } from "./economics.js";
+import { recordProviderAttemptCost } from "./providerCostLedger.js";
 import { recipesForCapability } from "./recipes.js";
 import type { ResolveResult, RuntimeAttempt, RuntimeHealth, RuntimeInput, VerifiedRecipe } from "./types.js";
 
@@ -73,11 +74,7 @@ export function projectRecipeOutput(recipe: VerifiedRecipe, input: RuntimeInput,
   return output;
 }
 
-/**
- * Execute exactly one recipe without touching circuit-breaker, AgentRank, or Kappa state.
- * Product Theta uses this primitive to verify supply candidates before they
- * are eligible for registration in the executable recipe registry.
- */
+/** Execute one recipe without mutating product routing state. */
 export async function attemptRecipe(recipe: VerifiedRecipe, input: RuntimeInput, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<{ attempt: RuntimeAttempt; output?: Record<string, unknown> }> {
   const started = Date.now();
   let url: string | null = null;
@@ -120,29 +117,26 @@ function scheduleAgentRankExploration(capability: string, registered: VerifiedRe
   if (!explorationRecipe || explorationInFlight.has(explorationRecipe.recipe_fingerprint)) return;
   explorationInFlight.add(explorationRecipe.recipe_fingerprint);
 
-  // Privacy + economics boundary: shadow probes use only verified example input
-  // and, when Kappa enforcement is active, only economically eligible providers.
   void attemptRecipe(explorationRecipe, explorationRecipe.example_input, timeoutMs)
     .then(result => {
-      recordAgentRankAttempt({
+      recordAgentRankAttempt({ capability, attempt: result.attempt, attemptPosition: 0, rescue: false, source: "exploration" });
+      recordProviderAttemptCost({
+        executionId: null,
         capability,
+        recipe: explorationRecipe,
         attempt: result.attempt,
-        attemptPosition: 0,
-        rescue: false,
         source: "exploration",
+        customerBillable: false,
       });
     })
-    .catch(() => {
-      // attemptRecipe normally converts exceptions into RuntimeAttempt; this is an
-      // extra guard so advisory exploration can never affect a user resolution.
-    })
+    .catch(() => {})
     .finally(() => explorationInFlight.delete(explorationRecipe.recipe_fingerprint));
 }
 
 export async function resolveCapability(
   capability: string,
   input: RuntimeInput,
-  options: { timeoutMs?: number; meterEconomics?: boolean } = {},
+  options: { timeoutMs?: number; meterEconomics?: boolean; executionId?: string | null } = {},
 ): Promise<ResolveResult> {
   const registered = recipesForCapability(capability);
   if (!registered.length) return { status: "unavailable", capability, reason: "No replay-verified recipe is registered for this capability", attempts: [] };
@@ -151,12 +145,7 @@ export async function resolveCapability(
   const agentRankOrdered = rankRecipesForExecution(registered);
   const recipes = rankRecipesByEconomics(agentRankOrdered);
   if (!recipes.length && economicsEnforcementEnabled()) {
-    return {
-      status: "unavailable",
-      capability,
-      reason: "No replay-verified provider satisfies the configured Kappa economics policy",
-      attempts: [],
-    };
+    return { status: "unavailable", capability, reason: "No replay-verified provider satisfies the configured Kappa economics policy", attempts: [] };
   }
 
   const attempts: RuntimeAttempt[] = [];
@@ -166,6 +155,14 @@ export async function resolveCapability(
     const attemptPosition = attempts.length;
     attempts.push(result.attempt);
     recordAgentRankAttempt({ capability, attempt: result.attempt, attemptPosition, rescue: attemptPosition > 0 && Boolean(result.output) });
+    recordProviderAttemptCost({
+      executionId: options.executionId ?? null,
+      capability,
+      recipe,
+      attempt: result.attempt,
+      source: "routing",
+      customerBillable: true,
+    });
     if (result.output) {
       markSuccess(recipe);
       if (options.meterEconomics !== false) recordEconomicsResolution({ capability, recipe });
