@@ -138,6 +138,10 @@ function operationScore(path: string, operation: any, lead: ProviderDiscoveryCan
   return { score: Number(Math.min(1, coverage * 0.8 + operationIdBonus + pathBonus).toFixed(4)), matched };
 }
 
+function bestOperation(choices: SelectedOperation[]): SelectedOperation | null {
+  return [...choices].sort((a, b) => b.score - a.score || b.matched.length - a.matched.length || a.path.localeCompare(b.path))[0] ?? null;
+}
+
 function selectOperation(spec: OpenApiObject, lead: ProviderDiscoveryCandidate): SelectedOperation | null {
   const choices: SelectedOperation[] = [];
   for (const [path, rawPathItem] of Object.entries(spec.paths ?? {})) {
@@ -149,11 +153,14 @@ function selectOperation(spec: OpenApiObject, lead: ProviderDiscoveryCandidate):
       choices.push({ method, path, pathItem, operation, score: scored.score, matched: scored.matched });
     }
   }
-  choices.sort((a, b) => b.score - a.score
-    || b.matched.length - a.matched.length
-    || (a.method === b.method ? 0 : a.method === "GET" ? -1 : 1)
-    || a.path.localeCompare(b.path));
-  return choices[0] ?? null;
+
+  const relevantGet = choices.filter(choice => choice.method === "GET" && choice.score > 0 && choice.matched.length > 0);
+  if (relevantGet.length) return bestOperation(relevantGet);
+  const relevantPost = choices.filter(choice => choice.method === "POST" && choice.score > 0 && choice.matched.length > 0);
+  if (relevantPost.length) return bestOperation(relevantPost);
+
+  const anyGet = choices.filter(choice => choice.method === "GET");
+  return bestOperation(anyGet.length ? anyGet : choices);
 }
 
 function deriveBindings(spec: OpenApiObject, pathItem: any, operation: any) {
@@ -201,7 +208,10 @@ function deriveJsonBodyBindings(spec: OpenApiObject, operation: any) {
 }
 
 function candidateId(lead: ProviderDiscoveryCandidate, method: HttpMethod, path: string): string {
-  const hash = createHash("sha256").update(`${lead.directory_id}|${lead.spec_url}|${method}|${path}`).digest("hex").slice(0, 16);
+  const material = method === "GET"
+    ? `${lead.directory_id}|${lead.spec_url}|${path}`
+    : `${lead.directory_id}|${lead.spec_url}|POST|${path}`;
+  const hash = createHash("sha256").update(material).digest("hex").slice(0, 16);
   return `theta2_${hash}`;
 }
 
@@ -217,7 +227,8 @@ export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, optio
   const selected = selectOperation(spec, lead);
   if (!selected) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: ["http_operation"], reason: "No GET or POST operation was found in the OpenAPI document" };
   if (selected.score <= 0 || selected.matched.length === 0) {
-    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: ["relevant_http_operation"], reason: "No GET or POST operation has semantic overlap with the unresolved demand" };
+    const diagnostic = selected.method === "GET" ? "relevant_get_operation" : "relevant_post_operation";
+    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: [diagnostic], reason: `No ${selected.method} operation has semantic overlap with the unresolved demand` };
   }
 
   const base_url = baseUrlFor(spec, selected.operation);
