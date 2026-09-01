@@ -2,11 +2,20 @@ import { createHash } from "node:crypto";
 import YAML from "yaml";
 import type { SupplyCandidate } from "./acquisition.js";
 import type { ProviderDiscoveryCandidate } from "./providerDiscovery.js";
-import type { ProjectionRule, RuntimeInput } from "./types.js";
+import type { HttpMethod, ProjectionRule, RuntimeInput } from "./types.js";
 import { harvestVerificationInputs, type VerificationInputEvidence } from "./verificationInputHarvest.js";
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 type OpenApiObject = Record<string, any>;
+
+type SelectedOperation = {
+  method: HttpMethod;
+  path: string;
+  pathItem: any;
+  operation: any;
+  score: number;
+  matched: string[];
+};
 
 export interface ProviderReadinessDiagnostics {
   credentials_required: string[];
@@ -14,9 +23,9 @@ export interface ProviderReadinessDiagnostics {
 }
 
 export interface OpenApiCompileResult {
-  status: "candidate_ready" | "needs_verification_inputs" | "needs_provider_setup" | "unsupported";
+  status: "candidate_ready" | "needs_verification_inputs" | "needs_safe_verification" | "needs_provider_setup" | "unsupported";
   lead: ProviderDiscoveryCandidate;
-  operation: { method: "GET"; path: string; operation_id: string | null; summary: string; score: number; matched_terms: string[] } | null;
+  operation: { method: HttpMethod; path: string; operation_id: string | null; summary: string; score: number; matched_terms: string[] } | null;
   candidate: SupplyCandidate | null;
   verification_input_evidence: VerificationInputEvidence[];
   provider_readiness: ProviderReadinessDiagnostics;
@@ -129,16 +138,21 @@ function operationScore(path: string, operation: any, lead: ProviderDiscoveryCan
   return { score: Number(Math.min(1, coverage * 0.8 + operationIdBonus + pathBonus).toFixed(4)), matched };
 }
 
-function selectOperation(spec: OpenApiObject, lead: ProviderDiscoveryCandidate) {
-  const choices: Array<{ path: string; pathItem: any; operation: any; score: number; matched: string[] }> = [];
+function selectOperation(spec: OpenApiObject, lead: ProviderDiscoveryCandidate): SelectedOperation | null {
+  const choices: SelectedOperation[] = [];
   for (const [path, rawPathItem] of Object.entries(spec.paths ?? {})) {
     const pathItem = resolveRef(spec, rawPathItem);
-    const operation = pathItem?.get;
-    if (!operation) continue;
-    const scored = operationScore(path, operation, lead);
-    choices.push({ path, pathItem, operation, score: scored.score, matched: scored.matched });
+    for (const method of ["GET", "POST"] as const) {
+      const operation = pathItem?.[method.toLowerCase()];
+      if (!operation) continue;
+      const scored = operationScore(path, operation, lead);
+      choices.push({ method, path, pathItem, operation, score: scored.score, matched: scored.matched });
+    }
   }
-  choices.sort((a, b) => b.score - a.score || b.matched.length - a.matched.length || a.path.localeCompare(b.path));
+  choices.sort((a, b) => b.score - a.score
+    || b.matched.length - a.matched.length
+    || (a.method === b.method ? 0 : a.method === "GET" ? -1 : 1)
+    || a.path.localeCompare(b.path));
   return choices[0] ?? null;
 }
 
@@ -157,24 +171,53 @@ function deriveBindings(spec: OpenApiObject, pathItem: any, operation: any) {
   return { path_bindings, query_bindings, parameters };
 }
 
-function candidateId(lead: ProviderDiscoveryCandidate, path: string): string {
-  const hash = createHash("sha256").update(`${lead.directory_id}|${lead.spec_url}|${path}`).digest("hex").slice(0, 16);
+function requestBodySchema(spec: OpenApiObject, operation: any): any {
+  const requestBody = resolveRef(spec, operation?.requestBody);
+  const schema = requestBody?.content?.["application/json"]?.schema;
+  return resolveRef(spec, schema);
+}
+
+function deriveJsonBodyBindings(spec: OpenApiObject, operation: any) {
+  const schema = requestBodySchema(spec, operation);
+  if (!schema || schema.type !== "object" || !schema.properties || typeof schema.properties !== "object") {
+    return { body_bindings: null, parameters: [], reason: "POST requestBody must declare an application/json top-level object schema" };
+  }
+  const propertyNames = Object.keys(schema.properties).sort().slice(0, 12);
+  if (!propertyNames.length) return { body_bindings: null, parameters: [], reason: "POST requestBody object has no declared properties" };
+
+  const required = new Set<string>(Array.isArray(schema.required) ? schema.required.filter((field: unknown): field is string => typeof field === "string") : []);
+  const selectedNames = required.size ? propertyNames.filter(name => required.has(name)) : propertyNames;
+  if (!selectedNames.length) return { body_bindings: null, parameters: [], reason: "POST requestBody required properties could not be mapped deterministically" };
+
+  const body_bindings: Record<string, string> = {};
+  const parameters: Array<{ input_name: string; parameter: any }> = [];
+  for (const name of selectedNames) {
+    const inputName = slug(name, "body_field");
+    const propertySchema = resolveRef(spec, schema.properties[name]);
+    body_bindings[name] = `$input.${inputName}`;
+    parameters.push({ input_name: inputName, parameter: { name, required: true, schema: propertySchema } });
+  }
+  return { body_bindings, parameters, reason: null };
+}
+
+function candidateId(lead: ProviderDiscoveryCandidate, method: HttpMethod, path: string): string {
+  const hash = createHash("sha256").update(`${lead.directory_id}|${lead.spec_url}|${method}|${path}`).digest("hex").slice(0, 16);
   return `theta2_${hash}`;
 }
 
-function operationView(selected: { path: string; operation: any; score: number; matched: string[] }) {
-  return { method: "GET" as const, path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched };
+function operationView(selected: SelectedOperation) {
+  return { method: selected.method, path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched };
 }
 
 export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, options: { fetchFn?: FetchLike; verificationInputs?: RuntimeInput[]; capability?: string; family?: string } = {}): Promise<OpenApiCompileResult> {
   const fetchFn = options.fetchFn ?? fetch;
-  const response = await fetchFn(lead.spec_url, { headers: { accept: "application/json, application/yaml, text/yaml, */*", "user-agent": "MISSING-Theta8/0.2" } });
+  const response = await fetchFn(lead.spec_url, { headers: { accept: "application/json, application/yaml, text/yaml, */*", "user-agent": "MISSING-Lambda1/0.3" } });
   if (!response.ok) throw new Error(`OpenAPI spec request failed with HTTP ${response.status}`);
   const spec = parseSpec(await response.text());
   const selected = selectOperation(spec, lead);
-  if (!selected) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: ["get_operation"], reason: "No GET operation was found in the OpenAPI document" };
+  if (!selected) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: ["http_operation"], reason: "No GET or POST operation was found in the OpenAPI document" };
   if (selected.score <= 0 || selected.matched.length === 0) {
-    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: ["relevant_get_operation"], reason: "No GET operation has semantic overlap with the unresolved demand" };
+    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: ["relevant_http_operation"], reason: "No GET or POST operation has semantic overlap with the unresolved demand" };
   }
 
   const base_url = baseUrlFor(spec, selected.operation);
@@ -201,23 +244,62 @@ export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, optio
       verification_input_evidence: [],
       provider_readiness,
       missing,
-      reason: `Relevant provider cannot enter automatic verification yet because ${reasons.join("; ")}`,
+      reason: `Relevant provider cannot enter verification yet because ${reasons.join("; ")}`,
     };
   }
 
-  const { path_bindings, query_bindings, parameters } = deriveBindings(spec, selected.pathItem, selected.operation);
-  const { projection, required } = topLevelProjection(spec, selectedResponseSchema);
-  if (!Object.keys(projection).length) {
-    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness, missing: ["object_response_projection"], reason: "The selected operation does not expose a simple top-level JSON object schema that Theta can project deterministically" };
+  const { path_bindings, query_bindings, parameters: urlParameters } = deriveBindings(spec, selected.pathItem, selected.operation);
+  let body_bindings: Record<string, string> | undefined;
+  let inputParameters = [...urlParameters];
+  if (selected.method === "POST") {
+    const body = deriveJsonBodyBindings(spec, selected.operation);
+    if (!body.body_bindings) {
+      return {
+        status: "unsupported",
+        lead,
+        operation: operationView(selected),
+        candidate: null,
+        verification_input_evidence: [],
+        provider_readiness,
+        missing: ["json_request_body"],
+        reason: body.reason,
+      };
+    }
+    body_bindings = body.body_bindings;
+    inputParameters = [...inputParameters, ...body.parameters];
   }
 
-  const harvested = options.verificationInputs === undefined ? harvestVerificationInputs(parameters) : null;
+  const { projection, required } = topLevelProjection(spec, selectedResponseSchema);
+  if (!Object.keys(projection).length) {
+    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness, missing: ["object_response_projection"], reason: "The selected operation does not expose a simple top-level JSON object schema that MISSING can project deterministically" };
+  }
+
+  const harvested = options.verificationInputs === undefined ? harvestVerificationInputs(inputParameters) : null;
   const verification_inputs = options.verificationInputs ?? harvested?.inputs ?? [];
   const capability = options.capability ?? `${slug(lead.normalized_intent, "discovered")}_capability`;
   const candidate: SupplyCandidate = {
-    candidate_id: candidateId(lead, selected.path), demand_intent: lead.demand_intent, capability, family: options.family ?? "discovered", provider: lead.provider,
-    evidence_url: lead.spec_url, method: "GET", base_url, path_template: selected.path, path_bindings, query_bindings, projection, required, verification_inputs,
+    candidate_id: candidateId(lead, selected.method, selected.path), demand_intent: lead.demand_intent, capability, family: options.family ?? "discovered", provider: lead.provider,
+    evidence_url: lead.spec_url, method: selected.method, base_url, path_template: selected.path, path_bindings, query_bindings,
+    ...(body_bindings ? { body_bindings } : {}),
+    projection, required, verification_inputs,
   };
+
+  if (selected.method === "POST") {
+    const missing = ["safe_verification"];
+    if (verification_inputs.length < 2) missing.push("verification_inputs");
+    return {
+      status: "needs_safe_verification",
+      lead,
+      operation: operationView(selected),
+      candidate,
+      verification_input_evidence: harvested?.evidence ?? [],
+      provider_readiness,
+      missing,
+      reason: verification_inputs.length < 2
+        ? "POST operation compiled deterministically, but MISSING requires two evidence-backed inputs and an explicit side-effect-safe verification path before any live replay"
+        : "POST operation compiled deterministically, but MISSING will not execute or promote it until an explicit side-effect-safe verification path is approved",
+    };
+  }
 
   const missing: string[] = [];
   if (verification_inputs.length < 2) missing.push("verification_inputs");
