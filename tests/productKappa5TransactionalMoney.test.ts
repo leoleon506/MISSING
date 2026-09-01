@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,7 @@ import { configureProviderCostLedger, truncateProviderCostLedger } from "../src/
 import { recipesForCapability } from "../src/runtime/recipes.js";
 import {
   configureTransactionalMoney,
+  reserveTransactionalPayment,
   transactionalMoneySnapshot,
   transactionalPayment,
   truncateTransactionalMoney,
@@ -80,7 +82,6 @@ afterEach(() => {
     "MISSING_ECONOMICS_JSON", "MISSING_TRANSACTIONAL_MONEY_ENABLED",
     "MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED",
   ]) delete process.env[key];
-  configureX402Fetch();
   configureTransactionalMoney(null);
   configureProviderCostLedger(null);
   configureX402Ledger(null);
@@ -164,21 +165,11 @@ describe("Product Kappa.5 transactional money core", () => {
 
   it("enforces one database reservation per payment hash", () => {
     setup();
-    const crypto = require("node:crypto") as typeof import("node:crypto");
-    const hash = crypto.createHash("sha256").update(paymentSignature(), "utf8").digest("hex");
-    const first = reserveDirect(hash, "execution-a");
-    const second = reserveDirect(hash, "execution-b");
-    expect(first).toBe(true);
-    expect(second).toBe(false);
+    const hash = createHash("sha256").update(paymentSignature(), "utf8").digest("hex");
+    const first = reserveTransactionalPayment({ paymentHash: hash, executionId: "execution-a", capability: "country_alpha_metadata" });
+    const second = reserveTransactionalPayment({ paymentHash: hash, executionId: "execution-b", capability: "country_alpha_metadata" });
+    expect(first.reserved).toBe(true);
+    expect(second.reserved).toBe(false);
     expect(transactionalPayment(hash)?.execution_id).toBe("execution-a");
   });
 });
-
-function reserveDirect(paymentHash: string, executionId: string) {
-  // Imported lazily to keep the assertion centered on the database UNIQUE invariant.
-  return require("../src/runtime/transactionalMoney.js").reserveTransactionalPayment({
-    paymentHash,
-    executionId,
-    capability: "country_alpha_metadata",
-  }).reserved as boolean;
-}
