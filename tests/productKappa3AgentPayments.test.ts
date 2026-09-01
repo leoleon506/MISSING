@@ -6,9 +6,11 @@ import { configureAgentRankLedger, resetAgentRankForTest } from "../src/runtime/
 import { handleAgentPaidResolution } from "../src/runtime/agentPayments.js";
 import { configureEconomicsLedger, economicsSummary, truncateEconomicsLedger } from "../src/runtime/economics.js";
 import { resetRuntimeHealth } from "../src/runtime/executor.js";
+import { configureProviderCostLedger, providerCostSnapshot, truncateProviderCostLedger } from "../src/runtime/providerCostLedger.js";
 import { recipesForCapability } from "../src/runtime/recipes.js";
 import { configureX402Fetch } from "../src/runtime/x402.js";
 import { configureX402Ledger, truncateX402Ledger, x402Snapshot } from "../src/runtime/x402Ledger.js";
+import { configureX402PaymentGuard, truncateX402PaymentGuard, x402PaymentGuardSnapshot } from "../src/runtime/x402PaymentGuard.js";
 
 let tempDir: string | null = null;
 
@@ -17,8 +19,12 @@ function setup() {
   configureAgentRankLedger(null);
   configureEconomicsLedger(join(tempDir, "economics.jsonl"));
   configureX402Ledger(join(tempDir, "x402.jsonl"));
+  configureX402PaymentGuard(join(tempDir, "x402-payment-guard.jsonl"));
+  configureProviderCostLedger(join(tempDir, "provider-costs.jsonl"));
   truncateEconomicsLedger();
   truncateX402Ledger();
+  truncateX402PaymentGuard();
+  truncateProviderCostLedger();
   resetAgentRankForTest();
   resetRuntimeHealth();
 
@@ -42,7 +48,7 @@ function setup() {
   });
 }
 
-function paymentSignature() {
+function paymentSignature(signature = "0xdeadbeef") {
   return Buffer.from(JSON.stringify({
     x402Version: 2,
     accepted: {
@@ -54,7 +60,7 @@ function paymentSignature() {
       maxTimeoutSeconds: 60,
       extra: { name: "USDC", version: "2" },
     },
-    payload: { signature: "0xdeadbeef", authorization: { from: "0xpayer" } },
+    payload: { signature, authorization: { from: "0xpayer" } },
   }), "utf8").toString("base64url");
 }
 
@@ -70,13 +76,15 @@ afterEach(() => {
   configureAgentRankLedger(null);
   configureEconomicsLedger(null);
   configureX402Ledger(null);
+  configureX402PaymentGuard(null);
+  configureProviderCostLedger(null);
   resetAgentRankForTest();
   resetRuntimeHealth();
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   tempDir = null;
 });
 
-describe("Product Kappa.3 autonomous x402 agent payments", () => {
+describe("Product Kappa.3/Kappa.4 autonomous x402 agent payments", () => {
   it("returns a standards-shaped 402 challenge at the MISSING micro-price", async () => {
     setup();
     const result = await handleAgentPaidResolution({
@@ -115,8 +123,60 @@ describe("Product Kappa.3 autonomous x402 agent payments", () => {
     expect(result.status).toBe(200);
     expect(result.headers?.["PAYMENT-RESPONSE"]).toBeTruthy();
     expect(facilitator).toHaveBeenCalledTimes(2);
-    expect(x402Snapshot()).toMatchObject({ settled_resolutions: 1, customer_revenue_microusd: 5000, provider_cost_microusd: 1000, gross_margin_microusd: 4000 });
+    expect(x402Snapshot()).toMatchObject({ settled_resolutions: 1, customer_revenue_microusd: 5000, known_provider_cost_microusd: 1000, known_gross_margin_microusd: 4000 });
+    expect(x402PaymentGuardSnapshot()).toMatchObject({ settled: 1, reserved: 0 });
     expect(economicsSummary().gross_margin_microusd).toBe(4000);
+  });
+
+  it("rejects reuse of the same verified payment before executing a provider again", async () => {
+    setup();
+    const facilitator = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/verify")) return new Response(JSON.stringify({ isValid: true, payer: "0xpayer" }), { status: 200 });
+      if (url.endsWith("/settle")) return new Response(JSON.stringify({ success: true, transaction: `0x${"b".repeat(64)}`, network: "eip155:84532" }), { status: 200 });
+      throw new Error(`Unexpected facilitator URL ${url}`);
+    });
+    configureX402Fetch(facilitator as typeof fetch);
+    const provider = vi.fn(async () => new Response(JSON.stringify({ country: { name: "New Zealand", region: "Oceania" } }), { status: 200 }));
+    vi.stubGlobal("fetch", provider);
+
+    const signature = paymentSignature("0xsame");
+    const first = await handleAgentPaidResolution({ request: { capability: "country_alpha_metadata", input: { country_code: "NZ" } }, paymentSignature: signature, resourceUrl: "https://missing.test/v1/agent/resolve" });
+    const second = await handleAgentPaidResolution({ request: { capability: "country_alpha_metadata", input: { country_code: "NZ" } }, paymentSignature: signature, resourceUrl: "https://missing.test/v1/agent/resolve" });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
+    expect(second.body).toMatchObject({ error: "payment_already_settled", payment_settled: true });
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(x402Snapshot().settled_resolutions).toBe(1);
+  });
+
+  it("counts failed failover attempts in realized COGS before profit", async () => {
+    setup();
+    const facilitator = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/verify")) return new Response(JSON.stringify({ isValid: true, payer: "0xpayer" }), { status: 200 });
+      if (url.endsWith("/settle")) return new Response(JSON.stringify({ success: true, transaction: `0x${"c".repeat(64)}`, network: "eip155:84532" }), { status: 200 });
+      throw new Error(`Unexpected facilitator URL ${url}`);
+    });
+    configureX402Fetch(facilitator as typeof fetch);
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("warnely.com")) return new Response("down", { status: 503 });
+      if (url.includes("countries.dev")) return new Response(JSON.stringify({ name: "New Zealand", region: "Oceania" }), { status: 200 });
+      throw new Error(`Unexpected provider URL ${url}`);
+    }));
+
+    const result = await handleAgentPaidResolution({
+      request: { capability: "country_alpha_metadata", input: { country_code: "NZ" } },
+      paymentSignature: paymentSignature("0xfailover"),
+      resourceUrl: "https://missing.test/v1/agent/resolve",
+    });
+
+    expect(result.status).toBe(200);
+    expect((result.body as any).payment).toMatchObject({ provider_attempts: 2, provider_cost_microusd: 4000, realized_gross_margin_microusd: 1000 });
+    expect(x402Snapshot()).toMatchObject({ known_provider_cost_microusd: 4000, known_gross_margin_microusd: 1000 });
+    expect(providerCostSnapshot().routing_attempts).toBe(2);
   });
 
   it("does not settle or recognize revenue when provider execution fails", async () => {
@@ -131,7 +191,7 @@ describe("Product Kappa.3 autonomous x402 agent payments", () => {
 
     const result = await handleAgentPaidResolution({
       request: { capability: "country_alpha_metadata", input: { country_code: "NZ" } },
-      paymentSignature: paymentSignature(),
+      paymentSignature: paymentSignature("0xfailure"),
       resourceUrl: "https://missing.test/v1/agent/resolve",
     });
 
@@ -139,5 +199,6 @@ describe("Product Kappa.3 autonomous x402 agent payments", () => {
     expect(facilitator).toHaveBeenCalledTimes(1);
     expect(x402Snapshot().customer_revenue_microusd).toBe(0);
     expect(economicsSummary().resolutions).toBe(0);
+    expect(x402PaymentGuardSnapshot().failed).toBe(1);
   });
 });
