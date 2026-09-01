@@ -3,7 +3,7 @@ import { isIP } from "node:net";
 import { demandSnapshot, type DemandObservation } from "./discovery.js";
 import { attemptRecipe } from "./executor.js";
 import { recipesForCapability, registerPromotedRecipe } from "./recipes.js";
-import type { ProjectionRule, RuntimeAttempt, RuntimeInput, VerifiedRecipe } from "./types.js";
+import type { HttpMethod, ProjectionRule, RuntimeAttempt, RuntimeInput, VerifiedRecipe } from "./types.js";
 
 export interface SupplyOpportunity {
   intent: string;
@@ -24,11 +24,12 @@ export interface SupplyCandidate {
   family: string;
   provider: string;
   evidence_url: string;
-  method: "GET";
+  method: HttpMethod;
   base_url: string;
   path_template: string;
   path_bindings: Record<string, string>;
   query_bindings: Record<string, string>;
+  body_bindings?: Record<string, string>;
   projection: Record<string, ProjectionRule>;
   required: string[];
   verification_inputs: RuntimeInput[];
@@ -77,6 +78,7 @@ function recipeMaterial(candidate: SupplyCandidate) {
     path_template: candidate.path_template,
     path_bindings: candidate.path_bindings,
     query_bindings: candidate.query_bindings,
+    ...(candidate.body_bindings ? { body_bindings: candidate.body_bindings } : {}),
     projection: candidate.projection,
     required: candidate.required,
   });
@@ -127,7 +129,7 @@ function validateCandidateUrl(raw: string, label: string) {
 function validateCandidate(candidate: SupplyCandidate) {
   if (!candidate.candidate_id.trim()) throw new Error("candidate_id is required");
   if (!/^[a-z][a-z0-9_]*$/.test(candidate.capability)) throw new Error("capability must be a lowercase snake_case identifier");
-  if (candidate.method !== "GET") throw new Error("Only GET candidates are supported in Product Theta");
+  if (candidate.method !== "GET") throw new Error("Automatic Product Theta replay verification supports GET only; POST requires safe verification");
   if (candidate.verification_inputs.length < 2) throw new Error("At least two verification_inputs are required for replay verification");
   if (!candidate.required.length) throw new Error("At least one required output is required");
   for (const field of candidate.required) {
@@ -149,6 +151,7 @@ function toVerificationRecipe(candidate: SupplyCandidate, verifiedAt: string): V
     path_template: candidate.path_template,
     path_bindings: { ...candidate.path_bindings },
     query_bindings: { ...candidate.query_bindings },
+    ...(candidate.body_bindings ? { body_bindings: { ...candidate.body_bindings } } : {}),
     projection: structuredClone(candidate.projection),
     required: [...candidate.required],
     example_input: structuredClone(candidate.verification_inputs[0]),

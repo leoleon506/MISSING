@@ -3,7 +3,7 @@ import { compileOpenApiLead, type OpenApiCompileResult } from "./openApiCompiler
 import { discoverProviderCandidates, type ProviderDiscoveryCandidate } from "./providerDiscovery.js";
 import { isSupplyIntentBlocked, recordSupplyBlock } from "./supplyBlockLedger.js";
 
-export type Theta4Status = "promoted" | "rejected" | "needs_evidence" | "needs_provider_setup" | "no_candidates";
+export type Theta4Status = "promoted" | "rejected" | "needs_evidence" | "needs_safe_verification" | "needs_provider_setup" | "no_candidates";
 
 export interface Theta4TraceStep {
   stage: "opportunity" | "discovery" | "compile" | "verify_promote";
@@ -65,6 +65,8 @@ export async function runThetaOrchestrator(options: {
   const compileFn = options.compileFn ?? (lead => compileOpenApiLead(lead));
   const acquireFn = options.acquireFn ?? acquireVerifiedSupplyCandidate;
   let sawNeedsEvidence = false;
+  let safeVerificationReason: string | null = null;
+  let safeVerificationLead: ProviderDiscoveryCandidate | null = null;
   let providerSetupReason: string | null = null;
   let providerSetupLead: ProviderDiscoveryCandidate | null = null;
   let providerSetupResult: OpenApiCompileResult | null = null;
@@ -94,6 +96,13 @@ export async function runThetaOrchestrator(options: {
         providerSetupReason = compiled.reason ?? "Relevant provider requires setup before automatic verification";
         providerSetupLead = lead;
         providerSetupResult = compiled;
+      }
+      continue;
+    }
+    if (compiled.status === "needs_safe_verification") {
+      if (!safeVerificationReason) {
+        safeVerificationReason = compiled.reason ?? "POST candidate requires explicit side-effect-safe verification before live replay";
+        safeVerificationLead = lead;
       }
       continue;
     }
@@ -133,6 +142,16 @@ export async function runThetaOrchestrator(options: {
     }
   }
 
+  if (safeVerificationReason) {
+    return {
+      status: "needs_safe_verification",
+      opportunity,
+      selected_provider: safeVerificationLead?.provider ?? null,
+      recipe_fingerprint: null,
+      trace,
+      reason: safeVerificationReason,
+    };
+  }
   if (sawNeedsEvidence) {
     return { status: "needs_evidence", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: "At least one provider lead compiled but lacked two evidence-backed verification inputs" };
   }

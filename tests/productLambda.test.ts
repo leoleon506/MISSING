@@ -146,7 +146,7 @@ describe("Product Lambda HTTP capability core", () => {
     expect(readPromotedRecipes()).toEqual([verified]);
   });
 
-  it("keeps autonomous OpenAPI acquisition GET-only for side-effect safety", async () => {
+  it("compiles POST OpenAPI operations but keeps them behind safe verification", async () => {
     const lead = {
       source: "apis_guru" as const,
       directory_id: "lambda-post-only",
@@ -168,6 +168,15 @@ describe("Product Lambda HTTP capability core", () => {
         "/items": {
           post: {
             operationId: "createItem",
+            summary: "Create item",
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+                },
+              },
+            },
             responses: { "200": { content: { "application/json": { schema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } } } } },
           },
         },
@@ -175,9 +184,12 @@ describe("Product Lambda HTTP capability core", () => {
     };
     const compiled = await compileOpenApiLead(lead, {
       fetchFn: async () => new Response(JSON.stringify(spec), { status: 200, headers: { "content-type": "application/json" } }),
+      verificationInputs: [{ name: "alpha" }, { name: "beta" }],
     });
-    expect(compiled.status).toBe("unsupported");
-    expect(compiled.missing).toContain("get_operation");
-    expect(compiled.candidate).toBeNull();
+    expect(compiled.status).toBe("needs_safe_verification");
+    expect(compiled.operation?.method).toBe("POST");
+    expect(compiled.candidate?.method).toBe("POST");
+    expect(compiled.candidate?.body_bindings).toEqual({ name: "$input.name" });
+    expect(compiled.missing).toContain("safe_verification");
   });
 });
