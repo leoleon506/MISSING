@@ -169,7 +169,9 @@ export async function handleAgentPaidResolution(args: {
           provider_attempts: realized.attempts,
           provider_cost_microusd: realized.provider_cost_microusd,
           unknown_provider_cost_attempts: realized.unknown_cost_attempts,
-          realized_gross_margin_microusd: quote.customer_price_microusd - realized.provider_cost_microusd,
+          realized_gross_margin_microusd: realized.provider_cost_microusd === null
+            ? null
+            : quote.customer_price_microusd - realized.provider_cost_microusd,
         },
         resolution,
       },
