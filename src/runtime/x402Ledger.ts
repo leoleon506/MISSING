@@ -69,10 +69,13 @@ export function recordX402Settlement(args: {
   capability: string;
   recipe: VerifiedRecipe;
   customerPriceMicrousd: number;
+  realizedProviderCostMicrousd?: number;
 }): { recorded: boolean; event: X402LedgerEvent | null } {
   if (x402Events().some(event => event.payment_hash === args.paymentHash)) return { recorded: false, event: null };
   const economics = recipeEconomics(args.recipe);
   if (!economics || economics.customer_price_microusd !== args.customerPriceMicrousd) return { recorded: false, event: null };
+  const realizedCost = args.realizedProviderCostMicrousd ?? economics.provider_cost_microusd;
+  if (!Number.isSafeInteger(realizedCost) || realizedCost < 0) return { recorded: false, event: null };
   const event: X402LedgerEvent = {
     version: 1,
     observed_at: new Date().toISOString(),
@@ -82,8 +85,8 @@ export function recordX402Settlement(args: {
     provider: args.recipe.provider,
     recipe_fingerprint: args.recipe.recipe_fingerprint,
     customer_price_microusd: economics.customer_price_microusd,
-    provider_cost_microusd: economics.provider_cost_microusd,
-    gross_margin_microusd: economics.margin_microusd,
+    provider_cost_microusd: realizedCost,
+    gross_margin_microusd: economics.customer_price_microusd - realizedCost,
     network: args.network ?? null,
   };
   const path = x402LedgerPath();
@@ -91,6 +94,8 @@ export function recordX402Settlement(args: {
     mkdirSync(dirname(path), { recursive: true });
     appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8");
   }
+  // Compatibility meter: records the selected provider's configured economics.
+  // Realized routing COGS, including failed attempts, lives in this x402 event.
   recordEconomicsResolution({ capability: args.capability, recipe: args.recipe });
   return { recorded: true, event };
 }
