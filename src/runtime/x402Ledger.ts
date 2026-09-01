@@ -12,8 +12,8 @@ export interface X402LedgerEvent {
   provider: string;
   recipe_fingerprint: string;
   customer_price_microusd: number;
-  provider_cost_microusd: number;
-  gross_margin_microusd: number;
+  provider_cost_microusd: number | null;
+  gross_margin_microusd: number | null;
   network: string | null;
 }
 
@@ -32,6 +32,10 @@ export function configureX402Ledger(path: string | null | undefined) {
   overridePath = path === undefined ? undefined : path === null ? null : resolve(path);
 }
 
+function validMoney(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function validEvent(value: unknown): value is X402LedgerEvent {
   if (!value || typeof value !== "object") return false;
   const e = value as Partial<X402LedgerEvent>;
@@ -42,9 +46,9 @@ function validEvent(value: unknown): value is X402LedgerEvent {
     && typeof e.capability === "string"
     && typeof e.provider === "string"
     && typeof e.recipe_fingerprint === "string"
-    && Number.isSafeInteger(e.customer_price_microusd)
-    && Number.isSafeInteger(e.provider_cost_microusd)
-    && Number.isSafeInteger(e.gross_margin_microusd);
+    && validMoney(e.customer_price_microusd)
+    && (e.provider_cost_microusd === null || validMoney(e.provider_cost_microusd))
+    && (e.gross_margin_microusd === null || Number.isSafeInteger(e.gross_margin_microusd));
 }
 
 export function x402Events(): X402LedgerEvent[] {
@@ -69,13 +73,15 @@ export function recordX402Settlement(args: {
   capability: string;
   recipe: VerifiedRecipe;
   customerPriceMicrousd: number;
-  realizedProviderCostMicrousd?: number;
+  realizedProviderCostMicrousd?: number | null;
 }): { recorded: boolean; event: X402LedgerEvent | null } {
   if (x402Events().some(event => event.payment_hash === args.paymentHash)) return { recorded: false, event: null };
   const economics = recipeEconomics(args.recipe);
   if (!economics || economics.customer_price_microusd !== args.customerPriceMicrousd) return { recorded: false, event: null };
-  const realizedCost = args.realizedProviderCostMicrousd ?? economics.provider_cost_microusd;
-  if (!Number.isSafeInteger(realizedCost) || realizedCost < 0) return { recorded: false, event: null };
+  const realizedCost = args.realizedProviderCostMicrousd === undefined
+    ? economics.provider_cost_microusd
+    : args.realizedProviderCostMicrousd;
+  if (realizedCost !== null && (!Number.isSafeInteger(realizedCost) || realizedCost < 0)) return { recorded: false, event: null };
   const event: X402LedgerEvent = {
     version: 1,
     observed_at: new Date().toISOString(),
@@ -86,7 +92,7 @@ export function recordX402Settlement(args: {
     recipe_fingerprint: args.recipe.recipe_fingerprint,
     customer_price_microusd: economics.customer_price_microusd,
     provider_cost_microusd: realizedCost,
-    gross_margin_microusd: economics.customer_price_microusd - realizedCost,
+    gross_margin_microusd: realizedCost === null ? null : economics.customer_price_microusd - realizedCost,
     network: args.network ?? null,
   };
   const path = x402LedgerPath();
@@ -94,20 +100,21 @@ export function recordX402Settlement(args: {
     mkdirSync(dirname(path), { recursive: true });
     appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8");
   }
-  // Compatibility meter: records the selected provider's configured economics.
-  // Realized routing COGS, including failed attempts, lives in this x402 event.
   recordEconomicsResolution({ capability: args.capability, recipe: args.recipe });
   return { recorded: true, event };
 }
 
 export function x402Snapshot() {
   const events = x402Events();
+  const known = events.filter(event => event.provider_cost_microusd !== null && event.gross_margin_microusd !== null);
   return {
     ledger_persistence: x402LedgerPath() !== null,
     settled_resolutions: events.length,
+    realized_margin_resolutions: known.length,
+    unknown_realized_margin_resolutions: events.length - known.length,
     customer_revenue_microusd: events.reduce((sum, event) => sum + event.customer_price_microusd, 0),
-    provider_cost_microusd: events.reduce((sum, event) => sum + event.provider_cost_microusd, 0),
-    gross_margin_microusd: events.reduce((sum, event) => sum + event.gross_margin_microusd, 0),
+    known_provider_cost_microusd: known.reduce((sum, event) => sum + (event.provider_cost_microusd ?? 0), 0),
+    known_gross_margin_microusd: known.reduce((sum, event) => sum + (event.gross_margin_microusd ?? 0), 0),
   };
 }
 
