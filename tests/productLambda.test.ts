@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,8 @@ import type { VerifiedRecipe } from "../src/runtime/types.js";
 const tempDirs: string[] = [];
 const servers: Server[] = [];
 const credentialEnv = "MISSING_CREDENTIAL_TEST_PROVIDER_API_KEY";
+
+type TestRequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 
 function recipe(overrides: Partial<VerifiedRecipe> = {}): VerifiedRecipe {
   return {
@@ -39,8 +41,13 @@ function recipe(overrides: Partial<VerifiedRecipe> = {}): VerifiedRecipe {
   };
 }
 
-async function localServer(handler: Parameters<typeof createServer>[0]) {
-  const server = createServer(handler);
+async function localServer(handler: TestRequestHandler) {
+  const server = createServer((req, res) => {
+    void Promise.resolve(handler(req, res)).catch(error => {
+      res.statusCode = 500;
+      res.end(error instanceof Error ? error.message : String(error));
+    });
+  });
   servers.push(server);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
