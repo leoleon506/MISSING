@@ -8,6 +8,7 @@ import { agentRankEnabled, agentRankExplorationEnabled, agentRankLedgerPath } fr
 import { agentPaymentsSnapshot, handleAgentPaidResolution } from "../runtime/agentPayments.js";
 import { authorizeControlPlane, controlPlaneCycleOptions, controlPlaneEnabled } from "../runtime/controlPlane.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
+import { distributedMoneyEnabled, initializeDistributedMoney } from "../runtime/distributedMoney.js";
 import { economicsEnforcementEnabled, economicsLedgerPath } from "../runtime/economics.js";
 import { openApiCompilerEnabled } from "../runtime/openApiCompiler.js";
 import { runThetaOrchestrator, thetaOrchestratorEnabled } from "../runtime/orchestrator.js";
@@ -62,8 +63,9 @@ export function readinessPayload(baseUrl: string) {
   const supply_persistence = supplyLedgerPath() !== null;
   const agentrank_persistence = agentRankLedgerPath() !== null;
   const economics_persistence = economicsLedgerPath() !== null;
+  const distributedReady = !distributedMoneyEnabled() || agentPaymentsSnapshot().distributed_money.ready;
   return {
-    status: public_url_valid && demand_persistence && supply_persistence && agentrank_persistence ? "ready" : "not_ready",
+    status: public_url_valid && demand_persistence && supply_persistence && agentrank_persistence && distributedReady ? "ready" : "not_ready",
     public_url_valid,
     demand_persistence,
     supply_persistence,
@@ -131,11 +133,7 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
   app.post("/v1/agent/resolve", express.json({ limit: "64kb" }), async (req: ExpressRequest, res: ExpressResponse) => {
     try {
       const resourceUrl = `${baseUrl.replace(/\/$/, "")}/v1/agent/resolve`;
-      const result = await handleAgentPaidResolution({
-        request: req.body,
-        paymentSignature: req.get("PAYMENT-SIGNATURE"),
-        resourceUrl,
-      });
+      const result = await handleAgentPaidResolution({ request: req.body, paymentSignature: req.get("PAYMENT-SIGNATURE"), resourceUrl });
       if (result.headers) for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
       res.status(result.status).json(result.body);
     } catch (error) {
@@ -153,35 +151,19 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
     }
   });
 
-  app.get("/livez", (_req, res) => {
-    res.status(200).json({ status: "live" });
-  });
-
+  app.get("/livez", (_req, res) => res.status(200).json({ status: "live" }));
   app.get("/readyz", (_req, res) => {
     const payload = readinessPayload(baseUrl);
     res.status(payload.status === "ready" ? 200 : 503).json(payload);
   });
-
-  app.get("/healthz", (_req, res) => {
-    res.status(200).json(healthPayload());
-  });
-
+  app.get("/healthz", (_req, res) => res.status(200).json(healthPayload()));
   app.get("/sandboxz", (_req, res) => {
     const config = sandboxConfig();
-    res.status(200).json({
-      sandbox: config.enabled,
-      requests_per_window: config.requests_per_window,
-      window_ms: config.window_ms,
-      telemetry: sandboxSnapshot(),
-    });
+    res.status(200).json({ sandbox: config.enabled, requests_per_window: config.requests_per_window, window_ms: config.window_ms, telemetry: sandboxSnapshot() });
   });
 
   mountA2A(app, baseUrl);
-
-  app.use((_req, res) => {
-    res.status(404).json({ error: "not_found" });
-  });
-
+  app.use((_req, res) => res.status(404).json({ error: "not_found" }));
   return app;
 }
 
@@ -189,6 +171,7 @@ export async function serveHttp() {
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? "127.0.0.1";
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Invalid PORT: ${process.env.PORT}`);
+  if (distributedMoneyEnabled()) await initializeDistributedMoney();
   const resolvedPublicBaseUrl = publicBaseUrl(port, host);
   const server = createServer(createProductHttpApp(resolvedPublicBaseUrl));
 
