@@ -163,7 +163,7 @@ describe("Product Kappa.3/Kappa.4 autonomous x402 agent payments", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("warnely.com")) return new Response("down", { status: 503 });
-      if (url.includes("countries.dev")) return new Response(JSON.stringify({ name: "New Zealand", region: "Oceania" }), { status: 200 });
+      if (url.includes("countries.dev")) return new Response(JSON.stringify({ alpha2Code: "NZ", name: "New Zealand", region: "Oceania" }), { status: 200 });
       throw new Error(`Unexpected provider URL ${url}`);
     }));
 
