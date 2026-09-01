@@ -141,14 +141,18 @@ describe("Product Lambda HTTP capability core", () => {
 
   it("keeps autonomous OpenAPI acquisition GET-only for side-effect safety", async () => {
     const lead = {
+      source: "apis_guru" as const,
       directory_id: "lambda-post-only",
       provider: "POST Only Provider",
+      title: "POST Only Provider",
+      description: "Creates items",
       spec_url: "https://provider.example/openapi.json",
+      directory_url: null,
+      openapi_version: "3.0.0",
       demand_intent: "create an item",
       normalized_intent: "create item",
       matched_terms: ["create", "item"],
       score: 1,
-      source: "apis_guru" as const,
     };
     const spec = {
       openapi: "3.0.0",
