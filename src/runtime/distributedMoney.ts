@@ -1,8 +1,5 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawnSync } from "node:child_process";
 import type { TransactionalPaymentRecord } from "./transactionalMoney.js";
-
-const execFileAsync = promisify(execFile);
 
 export interface DistributedPaymentRecord extends TransactionalPaymentRecord {
   provider_attempts: number | null;
@@ -76,13 +73,18 @@ async function run(sql: string, vars: Record<string, string> = {}): Promise<Exec
   }
   const args = ["-X", "-qAt", "-v", "ON_ERROR_STOP=1"];
   for (const [key, value] of Object.entries(vars)) args.push("-v", `${key}=${value}`);
-  args.push("-c", sql);
-  const result = await execFileAsync(process.env.MISSING_PSQL_BIN?.trim() || "psql", args, {
+  const result = spawnSync(process.env.MISSING_PSQL_BIN?.trim() || "psql", args, {
     env: pgEnv(),
+    input: sql,
+    encoding: "utf8",
     maxBuffer: 4 * 1024 * 1024,
     timeout: Number(process.env.MISSING_POSTGRES_TIMEOUT_MS ?? 10000),
   });
-  return { stdout: result.stdout, stderr: result.stderr };
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`psql failed with exit ${result.status}: ${(result.stderr || "").trim()}`);
+  }
+  return { stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 
 const SCHEMA_SQL = `
