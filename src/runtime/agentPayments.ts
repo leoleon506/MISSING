@@ -1,5 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
 import { quoteCapability } from "./charging.js";
+import {
+  cachedDistributedResponse,
+  distributedMoneyEnabled,
+  distributedMoneySnapshot,
+  distributedPayment,
+  failDistributedPayment,
+  markDistributedPaymentSettling,
+  markDistributedSettlementPending,
+  reserveDistributedPayment,
+  settleDistributedPayment,
+  type DistributedPaymentRecord,
+} from "./distributedMoney.js";
 import { recipeEconomics } from "./economics.js";
 import { resolveCapability } from "./executor.js";
 import { providerCostForExecution, providerCostSnapshot } from "./providerCostLedger.js";
@@ -30,6 +42,7 @@ import {
   settleX402PaymentGuard,
   x402PaymentGuardSnapshot,
 } from "./x402PaymentGuard.js";
+import { x402TransactionState } from "./x402Reconciliation.js";
 
 const inFlightPayments = new Set<string>();
 
@@ -52,8 +65,8 @@ export interface AgentPaymentHttpResult {
   body: unknown;
 }
 
-function priorTransactionalResult(paymentKey: string): AgentPaymentHttpResult | null {
-  if (!transactionalMoneyEnabled()) return null;
+function priorSqliteResult(paymentKey: string): AgentPaymentHttpResult | null {
+  if (!transactionalMoneyEnabled() || distributedMoneyEnabled()) return null;
   const prior = transactionalPayment(paymentKey);
   if (!prior) return null;
   const cached = cachedTransactionalResponse(prior);
@@ -61,11 +74,106 @@ function priorTransactionalResult(paymentKey: string): AgentPaymentHttpResult | 
   return {
     status: prior.state === "settling" ? 503 : 409,
     body: {
-      error: prior.state === "settled"
-        ? "payment_already_settled"
-        : prior.state === "settling"
-          ? "payment_settlement_reconciliation_required"
-          : "payment_already_used",
+      error: prior.state === "settled" ? "payment_already_settled" : prior.state === "settling" ? "payment_settlement_reconciliation_required" : "payment_already_used",
+      prior_state: prior.state,
+      payment_settled: prior.state === "settled",
+      transaction: prior.transaction_reference ?? undefined,
+    },
+  };
+}
+
+function distributedResponse(record: DistributedPaymentRecord) {
+  if (!record.transaction_reference || record.customer_price_microusd === null || !record.resolution_json) return null;
+  try {
+    const resolution = JSON.parse(record.resolution_json) as any;
+    const settlement = { success: true, transaction: record.transaction_reference, network: record.network ?? undefined };
+    const headers = {
+      "PAYMENT-RESPONSE": x402PaymentResponseHeader(settlement),
+      "Cache-Control": "private, no-store",
+    };
+    const body = {
+      status: "resolved",
+      payment: {
+        rail: "x402",
+        settled: true,
+        amount_microusd: record.customer_price_microusd,
+        transaction: record.transaction_reference,
+        provider_attempts: record.provider_attempts ?? 0,
+        provider_cost_microusd: record.provider_cost_microusd,
+        unknown_provider_cost_attempts: record.unknown_provider_cost_attempts ?? 0,
+        realized_gross_margin_microusd: record.gross_margin_microusd,
+      },
+      resolution,
+    };
+    return { headers, body, resolution, settlement };
+  } catch {
+    return null;
+  }
+}
+
+async function priorDistributedResult(paymentKey: string): Promise<AgentPaymentHttpResult | null> {
+  if (!distributedMoneyEnabled()) return null;
+  const prior = await distributedPayment(paymentKey);
+  if (!prior) return null;
+  const cached = cachedDistributedResponse(prior);
+  if (cached) return cached;
+
+  if (prior.state === "settling" && prior.transaction_reference) {
+    const chain = await x402TransactionState(prior.transaction_reference);
+    if (chain.state === "confirmed") {
+      const reconstructed = distributedResponse(prior);
+      if (!reconstructed) return { status: 503, body: { error: "payment_reconciliation_data_incomplete", prior_state: "settling" } };
+      const committed = await settleDistributedPayment({
+        paymentHash: prior.payment_hash,
+        executionId: prior.execution_id,
+        transactionReference: prior.transaction_reference,
+        responseStatus: 200,
+        responseHeaders: reconstructed.headers,
+        responseBody: reconstructed.body,
+      });
+      if (!committed.changed) {
+        const latest = await distributedPayment(paymentKey);
+        if (latest) {
+          const recovered = cachedDistributedResponse(latest);
+          if (recovered) return recovered;
+        }
+        return { status: 503, body: { error: "payment_commit_reconciliation_required", payment_settled: true, transaction: prior.transaction_reference } };
+      }
+      const recipeFingerprint = reconstructed.resolution?.recipe_fingerprint;
+      const recipe = VERIFIED_RECIPES.find(item => item.recipe_fingerprint === recipeFingerprint) ?? null;
+      if (recipe) {
+        recordX402Settlement({
+          paymentHash: prior.payment_hash,
+          transactionReference: prior.transaction_reference,
+          network: prior.network ?? undefined,
+          capability: prior.capability,
+          recipe,
+          customerPriceMicrousd: prior.customer_price_microusd!,
+          realizedProviderCostMicrousd: prior.provider_cost_microusd,
+        });
+      }
+      return { status: 200, headers: reconstructed.headers, body: reconstructed.body };
+    }
+    if (chain.state === "failed") {
+      await failDistributedPayment({ paymentHash: prior.payment_hash, executionId: prior.execution_id, reason: "settlement_transaction_failed_onchain", from: "settling" });
+      return { status: 409, body: { error: "payment_settlement_failed_onchain", prior_state: "failed", payment_settled: false, transaction: prior.transaction_reference } };
+    }
+    return {
+      status: 503,
+      body: {
+        error: "payment_settlement_reconciliation_required",
+        prior_state: "settling",
+        transaction: prior.transaction_reference,
+        reconciliation: chain.state,
+        reason: chain.reason,
+      },
+    };
+  }
+
+  return {
+    status: prior.state === "settling" ? 503 : 409,
+    body: {
+      error: prior.state === "settled" ? "payment_already_settled" : prior.state === "settling" ? "payment_settlement_reconciliation_required" : prior.state === "reserved" ? "payment_in_progress" : "payment_already_used",
       prior_state: prior.state,
       payment_settled: prior.state === "settled",
       transaction: prior.transaction_reference ?? undefined,
@@ -86,29 +194,19 @@ export async function handleAgentPaidResolution(args: {
 
   const quote = quoteCapability(args.request.capability);
   if (quote.status !== "quoted") return { status: 404, body: quote };
-
-  const paymentRequired = x402PaymentRequired({
-    resourceUrl: args.resourceUrl,
-    capability: args.request.capability,
-    customerPriceMicrousd: quote.customer_price_microusd,
-  });
+  const paymentRequired = x402PaymentRequired({ resourceUrl: args.resourceUrl, capability: args.request.capability, customerPriceMicrousd: quote.customer_price_microusd });
   if (!paymentRequired) return { status: 503, body: { error: "agent_payment_rail_not_ready", rail: "x402" } };
   const requirements = paymentRequired.accepts[0];
 
   if (!args.paymentSignature) {
-    return {
-      status: 402,
-      headers: {
-        "PAYMENT-REQUIRED": x402PaymentRequiredHeader(paymentRequired),
-        "Cache-Control": "no-store",
-      },
-      body: paymentRequired,
-    };
+    return { status: 402, headers: { "PAYMENT-REQUIRED": x402PaymentRequiredHeader(paymentRequired), "Cache-Control": "no-store" }, body: paymentRequired };
   }
 
   const paymentKey = signatureHash(args.paymentSignature);
-  const prior = priorTransactionalResult(paymentKey);
-  if (prior) return prior;
+  const priorDistributed = await priorDistributedResult(paymentKey);
+  if (priorDistributed) return priorDistributed;
+  const priorSqlite = priorSqliteResult(paymentKey);
+  if (priorSqlite) return priorSqlite;
   if (inFlightPayments.has(paymentKey)) return { status: 409, body: { error: "payment_in_progress" } };
   inFlightPayments.add(paymentKey);
 
@@ -120,38 +218,25 @@ export async function handleAgentPaidResolution(args: {
       return { status: 502, body: { error: "payment_verification_unavailable", reason: error instanceof Error ? error.message : String(error) } };
     }
     if (!verified.valid) {
-      return {
-        status: 402,
-        headers: { "PAYMENT-REQUIRED": x402PaymentRequiredHeader(paymentRequired), "Cache-Control": "no-store" },
-        body: { ...paymentRequired, error: verified.reason },
-      };
+      return { status: 402, headers: { "PAYMENT-REQUIRED": x402PaymentRequiredHeader(paymentRequired), "Cache-Control": "no-store" }, body: { ...paymentRequired, error: verified.reason } };
     }
 
     const executionId = randomUUID();
-    if (transactionalMoneyEnabled()) {
+    if (distributedMoneyEnabled()) {
+      const reservation = await reserveDistributedPayment({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability });
+      if (!reservation.reserved) return await priorDistributedResult(verified.paymentHash) ?? { status: 409, body: { error: "payment_already_used" } };
+    } else if (transactionalMoneyEnabled()) {
       const reservation = reserveTransactionalPayment({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability });
-      if (!reservation.reserved) return priorTransactionalResult(verified.paymentHash) ?? { status: 409, body: { error: "payment_already_used" } };
+      if (!reservation.reserved) return priorSqliteResult(verified.paymentHash) ?? { status: 409, body: { error: "payment_already_used" } };
     } else {
       const guard = reserveX402Payment({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability });
-      if (!guard.reserved) {
-        return {
-          status: 409,
-          body: {
-            error: guard.prior?.state === "settled" ? "payment_already_settled" : "payment_already_used",
-            prior_state: guard.prior?.state ?? "in_progress",
-            payment_settled: guard.prior?.state === "settled",
-            transaction: guard.prior?.transaction_reference ?? undefined,
-          },
-        };
-      }
+      if (!guard.reserved) return { status: 409, body: { error: guard.prior?.state === "settled" ? "payment_already_settled" : "payment_already_used", prior_state: guard.prior?.state ?? "in_progress", payment_settled: guard.prior?.state === "settled", transaction: guard.prior?.transaction_reference ?? undefined } };
     }
 
-    const resolution = await resolveCapability(args.request.capability, args.request.input, {
-      meterEconomics: false,
-      executionId,
-    });
+    const resolution = await resolveCapability(args.request.capability, args.request.input, { meterEconomics: false, executionId });
     if (resolution.status !== "resolved") {
-      if (transactionalMoneyEnabled()) failTransactionalPayment({ paymentHash: verified.paymentHash, executionId, reason: resolution.reason });
+      if (distributedMoneyEnabled()) await failDistributedPayment({ paymentHash: verified.paymentHash, executionId, reason: resolution.reason });
+      else if (transactionalMoneyEnabled()) failTransactionalPayment({ paymentHash: verified.paymentHash, executionId, reason: resolution.reason });
       else failX402PaymentGuard({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability, reason: resolution.reason });
       return { status: 502, body: { status: resolution.status, reason: resolution.reason, payment_settled: false } };
     }
@@ -159,12 +244,23 @@ export async function handleAgentPaidResolution(args: {
     const recipe = VERIFIED_RECIPES.find(item => item.recipe_fingerprint === resolution.recipe_fingerprint) ?? null;
     const economics = recipe ? recipeEconomics(recipe) : null;
     if (!recipe || !economics || economics.customer_price_microusd !== quote.customer_price_microusd) {
-      if (transactionalMoneyEnabled()) failTransactionalPayment({ paymentHash: verified.paymentHash, executionId, reason: "pricing_changed_before_settlement" });
+      if (distributedMoneyEnabled()) await failDistributedPayment({ paymentHash: verified.paymentHash, executionId, reason: "pricing_changed_before_settlement" });
+      else if (transactionalMoneyEnabled()) failTransactionalPayment({ paymentHash: verified.paymentHash, executionId, reason: "pricing_changed_before_settlement" });
       else failX402PaymentGuard({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability, reason: "pricing_changed_before_settlement" });
       return { status: 503, body: { error: "pricing_changed_before_settlement", payment_settled: false } };
     }
 
-    if (transactionalMoneyEnabled()) {
+    const realized = providerCostForExecution(executionId);
+    const grossMargin = realized.provider_cost_microusd === null ? null : quote.customer_price_microusd - realized.provider_cost_microusd;
+    if (distributedMoneyEnabled()) {
+      const transition = await markDistributedPaymentSettling({
+        paymentHash: verified.paymentHash, executionId, customerPriceMicrousd: quote.customer_price_microusd,
+        providerCostMicrousd: realized.provider_cost_microusd, grossMarginMicrousd: grossMargin,
+        providerAttempts: realized.attempts, unknownProviderCostAttempts: realized.unknown_cost_attempts,
+        resolution, network: requirements.network,
+      });
+      if (!transition.changed) return { status: 503, body: { error: "payment_state_transition_failed", payment_settled: false } };
+    } else if (transactionalMoneyEnabled()) {
       const transition = markTransactionalPaymentSettling({ paymentHash: verified.paymentHash, executionId });
       if (!transition.changed) return { status: 503, body: { error: "payment_state_transition_failed", payment_settled: false } };
     }
@@ -173,91 +269,43 @@ export async function handleAgentPaidResolution(args: {
     try {
       settlement = await settleX402Payment({ paymentPayload: verified.paymentPayload, requirements });
     } catch (error) {
-      if (!transactionalMoneyEnabled()) {
-        failX402PaymentGuard({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability, reason: "payment_settlement_unavailable" });
-      }
-      return {
-        status: 503,
-        body: {
-          error: transactionalMoneyEnabled() ? "payment_settlement_reconciliation_required" : "payment_settlement_unavailable",
-          payment_settled: false,
-          reason: error instanceof Error ? error.message : String(error),
-        },
-      };
+      if (!distributedMoneyEnabled() && !transactionalMoneyEnabled()) failX402PaymentGuard({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability, reason: "payment_settlement_unavailable" });
+      return { status: 503, body: { error: distributedMoneyEnabled() || transactionalMoneyEnabled() ? "payment_settlement_reconciliation_required" : "payment_settlement_unavailable", payment_settled: false, reason: error instanceof Error ? error.message : String(error) } };
     }
+
+    if (!settlement.success && settlement.errorReason === "settlement_pending" && settlement.transaction && distributedMoneyEnabled()) {
+      await markDistributedSettlementPending({ paymentHash: verified.paymentHash, executionId, transactionReference: settlement.transaction, reason: "settlement_pending" });
+      return { status: 503, body: { error: "payment_settlement_reconciliation_required", payment_settled: false, transaction: settlement.transaction, prior_state: "settling" } };
+    }
+
     if (!settlement.success || !settlement.transaction) {
-      if (transactionalMoneyEnabled()) {
-        failTransactionalPayment({
-          paymentHash: verified.paymentHash,
-          executionId,
-          reason: settlement.errorReason ?? "payment_settlement_failed",
-          from: "settling",
-        });
-      } else {
-        failX402PaymentGuard({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability, reason: settlement.errorReason ?? "payment_settlement_failed" });
-      }
+      if (distributedMoneyEnabled()) await failDistributedPayment({ paymentHash: verified.paymentHash, executionId, reason: settlement.errorReason ?? "payment_settlement_failed", from: "settling" });
+      else if (transactionalMoneyEnabled()) failTransactionalPayment({ paymentHash: verified.paymentHash, executionId, reason: settlement.errorReason ?? "payment_settlement_failed", from: "settling" });
+      else failX402PaymentGuard({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability, reason: settlement.errorReason ?? "payment_settlement_failed" });
       return { status: 402, body: { error: settlement.errorReason ?? "payment_settlement_failed", payment_settled: false } };
     }
 
-    const realized = providerCostForExecution(executionId);
-    const responseHeaders = {
-      "PAYMENT-RESPONSE": x402PaymentResponseHeader(settlement),
-      "Cache-Control": "private, no-store",
-    };
+    const responseHeaders = { "PAYMENT-RESPONSE": x402PaymentResponseHeader(settlement), "Cache-Control": "private, no-store" };
     const responseBody = {
       status: "resolved",
       payment: {
-        rail: "x402",
-        settled: true,
-        amount_microusd: quote.customer_price_microusd,
-        transaction: settlement.transaction,
-        provider_attempts: realized.attempts,
-        provider_cost_microusd: realized.provider_cost_microusd,
-        unknown_provider_cost_attempts: realized.unknown_cost_attempts,
-        realized_gross_margin_microusd: realized.provider_cost_microusd === null
-          ? null
-          : quote.customer_price_microusd - realized.provider_cost_microusd,
+        rail: "x402", settled: true, amount_microusd: quote.customer_price_microusd, transaction: settlement.transaction,
+        provider_attempts: realized.attempts, provider_cost_microusd: realized.provider_cost_microusd,
+        unknown_provider_cost_attempts: realized.unknown_cost_attempts, realized_gross_margin_microusd: grossMargin,
       },
       resolution,
     };
 
-    if (transactionalMoneyEnabled()) {
-      const grossMargin = realized.provider_cost_microusd === null ? null : quote.customer_price_microusd - realized.provider_cost_microusd;
-      const committed = settleTransactionalPayment({
-        paymentHash: verified.paymentHash,
-        executionId,
-        transactionReference: settlement.transaction,
-        responseStatus: 200,
-        responseHeaders,
-        responseBody,
-        customerPriceMicrousd: quote.customer_price_microusd,
-        providerCostMicrousd: realized.provider_cost_microusd,
-        grossMarginMicrousd: grossMargin,
-      });
-      if (!committed.changed) {
-        return { status: 503, body: { error: "payment_commit_reconciliation_required", payment_settled: true, transaction: settlement.transaction } };
-      }
+    if (distributedMoneyEnabled()) {
+      const committed = await settleDistributedPayment({ paymentHash: verified.paymentHash, executionId, transactionReference: settlement.transaction, responseStatus: 200, responseHeaders, responseBody });
+      if (!committed.changed) return { status: 503, body: { error: "payment_commit_reconciliation_required", payment_settled: true, transaction: settlement.transaction } };
+    } else if (transactionalMoneyEnabled()) {
+      const committed = settleTransactionalPayment({ paymentHash: verified.paymentHash, executionId, transactionReference: settlement.transaction, responseStatus: 200, responseHeaders, responseBody, customerPriceMicrousd: quote.customer_price_microusd, providerCostMicrousd: realized.provider_cost_microusd, grossMarginMicrousd: grossMargin });
+      if (!committed.changed) return { status: 503, body: { error: "payment_commit_reconciliation_required", payment_settled: true, transaction: settlement.transaction } };
     }
 
-    // Kappa.3/Kappa.4 append-only ledgers remain as compatibility telemetry.
-    recordX402Settlement({
-      paymentHash: verified.paymentHash,
-      transactionReference: settlement.transaction,
-      network: settlement.network,
-      capability: args.request.capability,
-      recipe,
-      customerPriceMicrousd: quote.customer_price_microusd,
-      realizedProviderCostMicrousd: realized.provider_cost_microusd,
-    });
-    if (!transactionalMoneyEnabled()) {
-      settleX402PaymentGuard({
-        paymentHash: verified.paymentHash,
-        executionId,
-        capability: args.request.capability,
-        transactionReference: settlement.transaction,
-      });
-    }
-
+    recordX402Settlement({ paymentHash: verified.paymentHash, transactionReference: settlement.transaction, network: settlement.network, capability: args.request.capability, recipe, customerPriceMicrousd: quote.customer_price_microusd, realizedProviderCostMicrousd: realized.provider_cost_microusd });
+    if (!distributedMoneyEnabled() && !transactionalMoneyEnabled()) settleX402PaymentGuard({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability, transactionReference: settlement.transaction });
     return { status: 200, headers: responseHeaders, body: responseBody };
   } finally {
     inFlightPayments.delete(paymentKey);
@@ -266,11 +314,7 @@ export async function handleAgentPaidResolution(args: {
 
 export function agentPaymentsSnapshot() {
   return {
-    enabled: agentPaymentsEnabled(),
-    x402_ready: x402Ready(),
-    x402: x402Snapshot(),
-    payment_guard: x402PaymentGuardSnapshot(),
-    provider_costs: providerCostSnapshot(),
-    transactional_money: transactionalMoneySnapshot(),
+    enabled: agentPaymentsEnabled(), x402_ready: x402Ready(), x402: x402Snapshot(), payment_guard: x402PaymentGuardSnapshot(),
+    provider_costs: providerCostSnapshot(), transactional_money: transactionalMoneySnapshot(), distributed_money: distributedMoneySnapshot(),
   };
 }
