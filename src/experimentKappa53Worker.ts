@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { agentRequestHash } from "./runtime/requestBinding.js";
-import { reserveDistributedPayment } from "./runtime/distributedMoney.js";
+import { closeDistributedMoney, reserveDistributedPayment } from "./runtime/distributedMoney.js";
 
 const [raceId, replicaId, paymentHash, capability, inputB64, probePath] = process.argv.slice(2);
 if (!raceId || !replicaId || !paymentHash || !capability || !inputB64 || !probePath) {
@@ -26,3 +26,4 @@ process.stdout.write(JSON.stringify({
   prior_state: reservation.prior?.state ?? null,
   execution_id: reservation.reserved ? executionId : null,
 }));
+closeDistributedMoney();
