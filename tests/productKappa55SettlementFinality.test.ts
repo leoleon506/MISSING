@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { configureX402RpcFetch, x402MinConfirmations, x402SettlementProof } from "../src/runtime/x402Reconciliation.js";
+import { configureX402RpcFetch, x402FinalityPolicy, x402MinConfirmations, x402SettlementProof } from "../src/runtime/x402Reconciliation.js";
 
 const ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 const PAY_TO = "0x209693Bc6afc0C5328bA36FaF03C514EF312287C";
@@ -64,6 +64,7 @@ async function prove() {
 afterEach(() => {
   delete process.env.MISSING_X402_RPC_URL;
   delete process.env.MISSING_X402_MIN_CONFIRMATIONS;
+  delete process.env.MISSING_X402_FINALITY_POLICIES;
   configureX402RpcFetch();
 });
 
@@ -78,6 +79,7 @@ describe("Product Kappa.5.5 settlement finality and reorg resistance", () => {
       reason: "insufficient_confirmations",
       confirmations: 5,
       required_confirmations: 6,
+      finality_policy_source: "legacy_global_env",
       block_number: "0x64",
       block_hash: BLOCK_HASH,
     });
@@ -93,6 +95,7 @@ describe("Product Kappa.5.5 settlement finality and reorg resistance", () => {
       state: "verified",
       confirmations: 5,
       required_confirmations: 5,
+      finality_policy_source: "legacy_global_env",
       block_number: "0x64",
       block_hash: BLOCK_HASH,
     });
@@ -134,13 +137,19 @@ describe("Product Kappa.5.5 settlement finality and reorg resistance", () => {
     await expect(prove()).resolves.toMatchObject({ state: "unavailable", reason: "receipt_block_anchor_missing" });
   });
 
-  it("uses a conservative default and rejects invalid confirmation configuration", () => {
-    expect(x402MinConfirmations()).toBe(1);
+  it("never converts missing or invalid legacy confirmation configuration into 1", () => {
+    expect(x402MinConfirmations()).toBeNull();
+    expect(x402FinalityPolicy("eip155:84532")).toMatchObject({ ok: true, required_confirmations: 1, source: "builtin" });
+
     process.env.MISSING_X402_MIN_CONFIRMATIONS = "0";
-    expect(x402MinConfirmations()).toBe(1);
+    expect(x402MinConfirmations()).toBeNull();
+    expect(x402FinalityPolicy("eip155:84532")).toEqual({ ok: false, network: "eip155:84532", reason: "invalid_legacy_confirmation_config" });
+
     process.env.MISSING_X402_MIN_CONFIRMATIONS = "abc";
-    expect(x402MinConfirmations()).toBe(1);
+    expect(x402MinConfirmations()).toBeNull();
+
     process.env.MISSING_X402_MIN_CONFIRMATIONS = "12";
     expect(x402MinConfirmations()).toBe(12);
+    expect(x402FinalityPolicy("eip155:84532")).toMatchObject({ ok: true, required_confirmations: 12, source: "legacy_global_env" });
   });
 });
