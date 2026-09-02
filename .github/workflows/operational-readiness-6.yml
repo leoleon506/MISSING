@@ -1,0 +1,51 @@
+name: Operational Readiness 6 External Dependency Outage Recovery
+on:
+  push:
+    branches: [operational-readiness-6-external-dependency-outage-recovery]
+  pull_request:
+    branches: [main]
+
+jobs:
+  external-dependency-outage-recovery:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: missing
+          POSTGRES_PASSWORD: missing
+          POSTGRES_DB: missing_or6
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U missing -d missing_or6"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Operational external dependency outage recovery proof
+        env:
+          MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_or6?sslmode=disable
+          MISSING_POSTGRES_SSLMODE: disable
+          MISSING_POSTGRES_POOL_MAX: "4"
+          MISSING_POSTGRES_TIMEOUT_MS: "10000"
+        run: npx tsx src/operationalReadiness6.ts
+      - name: Verify OR6 evidence exists
+        run: test -s artifacts/operational-readiness-6-external-dependency-outage-recovery.json
+      - name: Upload OR6 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-readiness-6-external-dependency-outage-recovery
+          path: artifacts/operational-readiness-6-external-dependency-outage-recovery.json
+          if-no-files-found: warn
