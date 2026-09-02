@@ -31,6 +31,7 @@ export interface SupplyCandidate {
   query_bindings: Record<string, string>;
   body_bindings?: Record<string, string>;
   generated_headers?: GeneratedHeaderBinding[];
+  forced_inputs?: RuntimeInput;
   projection: Record<string, ProjectionRule>;
   required: string[];
   verification_inputs: RuntimeInput[];
@@ -81,6 +82,7 @@ function recipeMaterial(candidate: SupplyCandidate) {
     query_bindings: candidate.query_bindings,
     ...(candidate.body_bindings ? { body_bindings: candidate.body_bindings } : {}),
     ...(candidate.generated_headers?.length ? { generated_headers: candidate.generated_headers } : {}),
+    ...(candidate.forced_inputs && Object.keys(candidate.forced_inputs).length ? { forced_inputs: candidate.forced_inputs } : {}),
     projection: candidate.projection,
     required: candidate.required,
   });
@@ -155,6 +157,7 @@ export function recipeFromSupplyCandidate(candidate: SupplyCandidate, verifiedAt
     query_bindings: { ...candidate.query_bindings },
     ...(candidate.body_bindings ? { body_bindings: { ...candidate.body_bindings } } : {}),
     ...(candidate.generated_headers?.length ? { generated_headers: structuredClone(candidate.generated_headers) } : {}),
+    ...(candidate.forced_inputs && Object.keys(candidate.forced_inputs).length ? { forced_inputs: structuredClone(candidate.forced_inputs) } : {}),
     projection: structuredClone(candidate.projection),
     required: [...candidate.required],
     example_input: structuredClone(candidate.verification_inputs[0]),
