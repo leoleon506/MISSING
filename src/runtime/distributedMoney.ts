@@ -3,6 +3,7 @@ import type { TransactionalPaymentRecord } from "./transactionalMoney.js";
 
 export type DistributedPaymentState = "reserved" | "executing" | "provider_done" | "settling" | "settled" | "ambiguous" | "failed";
 export type ProviderRecoveryMode = "read_only" | "idempotent" | "ambiguous";
+export const CURRENT_DISTRIBUTED_RECOVERY_PROTOCOL_VERSION = 1;
 
 export interface DistributedPaymentRecord extends Omit<TransactionalPaymentRecord, "state"> {
   state: DistributedPaymentState;
@@ -17,6 +18,7 @@ export interface DistributedPaymentRecord extends Omit<TransactionalPaymentRecor
   lease_token: string | null;
   lease_fence: number;
   lease_expires_at: string | null;
+  recovery_protocol_version: number | null;
 }
 
 type ExecResult = { stdout: string; stderr: string };
@@ -202,7 +204,7 @@ CREATE TABLE IF NOT EXISTS missing_x402_payments (
   customer_price_microusd BIGINT, provider_cost_microusd BIGINT, gross_margin_microusd BIGINT, provider_attempts INTEGER,
   unknown_provider_cost_attempts INTEGER, resolution_json TEXT, network TEXT, provider_recipe_fingerprint TEXT,
   provider_recovery_mode TEXT, provider_idempotency_key TEXT, settlement_intent_id TEXT, lease_token TEXT,
-  lease_fence BIGINT NOT NULL DEFAULT 1, lease_expires_at TIMESTAMPTZ
+  lease_fence BIGINT NOT NULL DEFAULT 1, lease_expires_at TIMESTAMPTZ, recovery_protocol_version INTEGER
 );
 ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS request_hash TEXT;
 ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS provider_recipe_fingerprint TEXT;
@@ -212,6 +214,7 @@ ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS settlement_intent_id 
 ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS lease_token TEXT;
 ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS lease_fence BIGINT NOT NULL DEFAULT 1;
 ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
+ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS recovery_protocol_version INTEGER;
 ALTER TABLE missing_x402_payments DROP CONSTRAINT IF EXISTS missing_x402_payments_state_check;
 ALTER TABLE missing_x402_payments ADD CONSTRAINT missing_x402_payments_state_check CHECK (state IN ('reserved','executing','provider_done','settling','settled','ambiguous','failed'));
 ALTER TABLE missing_x402_payments DROP CONSTRAINT IF EXISTS missing_x402_payments_provider_recovery_mode_check;
@@ -243,6 +246,7 @@ function parseRecordLine(line: string): DistributedPaymentRecord | null {
     provider_attempts: integer(value.provider_attempts), unknown_provider_cost_attempts: integer(value.unknown_provider_cost_attempts), resolution_json: value.resolution_json == null ? null : String(value.resolution_json), network: value.network == null ? null : String(value.network),
     provider_recipe_fingerprint: value.provider_recipe_fingerprint == null ? null : String(value.provider_recipe_fingerprint), provider_recovery_mode: recoveryMode(value.provider_recovery_mode), provider_idempotency_key: value.provider_idempotency_key == null ? null : String(value.provider_idempotency_key),
     settlement_intent_id: value.settlement_intent_id == null ? null : String(value.settlement_intent_id), lease_token: value.lease_token == null ? null : String(value.lease_token), lease_fence: integer(value.lease_fence) ?? 1, lease_expires_at: value.lease_expires_at == null ? null : String(value.lease_expires_at),
+    recovery_protocol_version: integer(value.recovery_protocol_version),
   };
 }
 
@@ -304,8 +308,15 @@ function activeLeaseCondition(fence: number | undefined) {
 
 export async function reserveDistributedPayment(args: { paymentHash: string; requestHash: string; executionId: string; capability: string }) {
   await ensureReady();
-  const vars = { payment_hash: args.paymentHash, request_hash: args.requestHash, execution_id: args.executionId, capability: args.capability, ...leaseVars(args.executionId, 1) };
-  const { stdout } = await run(`WITH ins AS (INSERT INTO missing_x402_payments(payment_hash,request_hash,execution_id,capability,state,lease_token,lease_fence,lease_expires_at) VALUES (:'payment_hash',:'request_hash',:'execution_id',:'capability','reserved',:'lease_token',:'lease_fence'::bigint,NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond')) ON CONFLICT (payment_hash) DO NOTHING RETURNING *) SELECT row_to_json(ins) FROM ins;`, vars);
+  const vars = {
+    payment_hash: args.paymentHash,
+    request_hash: args.requestHash,
+    execution_id: args.executionId,
+    capability: args.capability,
+    recovery_protocol_version: String(CURRENT_DISTRIBUTED_RECOVERY_PROTOCOL_VERSION),
+    ...leaseVars(args.executionId, 1),
+  };
+  const { stdout } = await run(`WITH ins AS (INSERT INTO missing_x402_payments(payment_hash,request_hash,execution_id,capability,state,lease_token,lease_fence,lease_expires_at,recovery_protocol_version) VALUES (:'payment_hash',:'request_hash',:'execution_id',:'capability','reserved',:'lease_token',:'lease_fence'::bigint,NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond'),:'recovery_protocol_version'::int) ON CONFLICT (payment_hash) DO NOTHING RETURNING *) SELECT row_to_json(ins) FROM ins;`, vars);
   const inserted = parseRecordLine(stdout.trim());
   if (inserted) registerLeaseSession(args.executionId, args.executionId, inserted.lease_fence);
   const prior = inserted ?? await distributedPayment(args.paymentHash);
@@ -318,9 +329,23 @@ export async function claimDistributedRecovery(args: { paymentHash: string; requ
   const vars = { payment_hash: args.paymentHash, request_hash: args.requestHash, ...leaseVars(args.leaseToken, 1) };
   const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET lease_token=:'lease_token',lease_fence=lease_fence + 1,lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond'),updated_at=NOW() WHERE payment_hash=:'payment_hash' AND request_hash=:'request_hash' AND state IN ('reserved','executing','provider_done','settling') AND (lease_expires_at IS NULL OR lease_expires_at <= NOW()) AND lease_fence < 9007199254740991 RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   const rec = parseRecordLine(stdout.trim());
+  if (rec && rec.recovery_protocol_version !== CURRENT_DISTRIBUTED_RECOVERY_PROTOCOL_VERSION) {
+    const observed = rec.recovery_protocol_version === null ? "legacy" : String(rec.recovery_protocol_version);
+    const activeState = rec.state as "reserved" | "executing" | "provider_done" | "settling";
+    const quarantined = await markDistributedPaymentAmbiguous({
+      paymentHash: rec.payment_hash,
+      executionId: rec.execution_id,
+      reason: `recovery_protocol_version_untrusted:${observed}`,
+      from: activeState,
+      leaseToken: args.leaseToken,
+      leaseFence: rec.lease_fence,
+    });
+    const quarantinedRecord = quarantined.record ?? await distributedPayment(args.paymentHash);
+    return { claimed: false, record: null, leaseToken: null, leaseFence: null, quarantined: quarantinedRecord };
+  }
   if (rec) registerLeaseSession(rec.execution_id, args.leaseToken, rec.lease_fence);
   await refreshSnapshot();
-  return { claimed: Boolean(rec), record: rec, leaseToken: rec ? args.leaseToken : null, leaseFence: rec?.lease_fence ?? null };
+  return { claimed: Boolean(rec), record: rec, leaseToken: rec ? args.leaseToken : null, leaseFence: rec?.lease_fence ?? null, quarantined: null };
 }
 
 export async function renewDistributedLease(args: { paymentHash: string; executionId: string; leaseToken: string; leaseFence: number }) {
