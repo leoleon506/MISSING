@@ -121,7 +121,7 @@ afterEach(async () => {
 });
 
 describe("Product Lambda.3 dedicated safe POST replay", () => {
-  it("executes exactly two dry-run replays, rotates idempotency keys, promotes and survives reload", async () => {
+  it("executes exactly two dry-run replays, rotates idempotency keys, promotes and preserves containment after reload", async () => {
     const observedBodies: Array<Record<string, unknown>> = [];
     const observedKeys: string[] = [];
     const baseUrl = await localServer(async (req, res) => {
@@ -158,6 +158,7 @@ describe("Product Lambda.3 dedicated safe POST replay", () => {
 
     const promoted = acquired.verification.recipe!;
     expect(promoted.generated_headers).toEqual([{ location: "header", name: "Idempotency-Key", generator: "uuid_v4" }]);
+    expect(promoted.forced_inputs).toEqual({ dry_run: true });
     expect(promoted.verification.source).toBe("product_live");
     if (promoted.verification.source !== "product_live") throw new Error("unexpected verification source");
     expect(promoted.verification.safe_post?.policy).toBe("lambda2");
@@ -167,7 +168,8 @@ describe("Product Lambda.3 dedicated safe POST replay", () => {
 
     resetPromotedRecipesForTest();
     reloadPromotedRecipesFromLedger();
-    const resolved = await resolveCapability("lambda3_validate_item", { name: "runtime", dry_run: true });
+    // A caller cannot disable the containment mode after promotion.
+    const resolved = await resolveCapability("lambda3_validate_item", { name: "runtime", dry_run: false });
     expect(resolved.status).toBe("resolved");
     expect(observedBodies).toHaveLength(3);
     expect(observedBodies[2]).toEqual({ name: "runtime", dry_run: true });
@@ -205,6 +207,23 @@ describe("Product Lambda.3 dedicated safe POST replay", () => {
       input_overrides: {},
       generated_headers: [],
     }))).rejects.toThrow(/has not passed Lambda.2/i);
+    expect(requests).toBe(0);
+  });
+
+  it("does not execute a provider-declaration-only POST without enforceable containment", async () => {
+    let requests = 0;
+    const baseUrl = await localServer((_req, res) => {
+      requests += 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end('{"id":"unexpected","simulated":true}');
+    });
+    const declarationOnly = assessment({
+      signals: [{ kind: "provider_safe_declaration", sufficient: true, source: "x-safe-to-test", detail: "provider declaration" }],
+      input_overrides: {},
+      generated_headers: [],
+    });
+
+    await expect(verifySafePostCandidate(candidate(baseUrl), declarationOnly)).rejects.toThrow(/provider declaration alone is not sufficient/i);
     expect(requests).toBe(0);
   });
 
