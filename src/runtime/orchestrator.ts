@@ -3,7 +3,7 @@ import { compileOpenApiLead, type OpenApiCompileResult } from "./openApiCompiler
 import { discoverProviderCandidates, type ProviderDiscoveryCandidate } from "./providerDiscovery.js";
 import { isSupplyIntentBlocked, recordSupplyBlock } from "./supplyBlockLedger.js";
 
-export type Theta4Status = "promoted" | "rejected" | "needs_evidence" | "needs_safe_verification" | "needs_provider_setup" | "no_candidates";
+export type Theta4Status = "promoted" | "rejected" | "needs_evidence" | "needs_safe_verification" | "candidate_ready_for_safe_post_replay" | "needs_provider_setup" | "no_candidates";
 
 export interface Theta4TraceStep {
   stage: "opportunity" | "discovery" | "compile" | "verify_promote";
@@ -98,6 +98,16 @@ export async function runThetaOrchestrator(options: {
         providerSetupResult = compiled;
       }
       continue;
+    }
+    if (compiled.status === "candidate_ready_for_safe_post_replay") {
+      return {
+        status: "candidate_ready_for_safe_post_replay",
+        opportunity,
+        selected_provider: lead.provider,
+        recipe_fingerprint: null,
+        trace,
+        reason: compiled.reason ?? "POST candidate passed the safe replay policy and awaits the dedicated safe POST verifier",
+      };
     }
     if (compiled.status === "needs_safe_verification") {
       if (!safeVerificationReason) {
