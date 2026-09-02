@@ -44,7 +44,7 @@ import {
   settleX402PaymentGuard,
   x402PaymentGuardSnapshot,
 } from "./x402PaymentGuard.js";
-import { x402TransactionState } from "./x402Reconciliation.js";
+import { x402SettlementProof } from "./x402Reconciliation.js";
 
 const inFlightPayments = new Set<string>();
 
@@ -140,8 +140,19 @@ async function priorDistributedResult(paymentKey: string, currentRequestHash: st
   if (cached) return cached;
 
   if (prior.state === "settling" && prior.transaction_reference) {
-    const chain = await x402TransactionState(prior.transaction_reference);
-    if (chain.state === "confirmed") {
+    const asset = process.env.MISSING_X402_ASSET?.trim();
+    const payTo = process.env.MISSING_X402_PAY_TO?.trim();
+    if (!prior.network || prior.customer_price_microusd === null || !asset || !payTo) {
+      return { status: 503, body: { error: "payment_reconciliation_data_incomplete", prior_state: "settling" } };
+    }
+    const chain = await x402SettlementProof({
+      transaction: prior.transaction_reference,
+      network: prior.network,
+      asset,
+      payTo,
+      amount: String(prior.customer_price_microusd),
+    });
+    if (chain.state === "verified") {
       const reconstructed = distributedResponse(prior);
       if (!reconstructed) return { status: 503, body: { error: "payment_reconciliation_data_incomplete", prior_state: "settling" } };
       const committed = await settleDistributedPayment({
@@ -178,8 +189,8 @@ async function priorDistributedResult(paymentKey: string, currentRequestHash: st
       return { status: 200, headers: reconstructed.headers, body: reconstructed.body };
     }
     if (chain.state === "failed") {
-      await failDistributedPayment({ paymentHash: prior.payment_hash, executionId: prior.execution_id, reason: "settlement_transaction_failed_onchain", from: "settling" });
-      return { status: 409, body: { error: "payment_settlement_failed_onchain", prior_state: "failed", payment_settled: false, transaction: prior.transaction_reference } };
+      await failDistributedPayment({ paymentHash: prior.payment_hash, executionId: prior.execution_id, reason: `settlement_proof_${chain.reason ?? "failed"}`, from: "settling" });
+      return { status: 409, body: { error: "payment_settlement_proof_failed", reason: chain.reason, prior_state: "failed", payment_settled: false, transaction: prior.transaction_reference } };
     }
     return {
       status: 503,
@@ -313,6 +324,24 @@ export async function handleAgentPaidResolution(args: {
       else if (transactionalMoneyEnabled()) failTransactionalPayment({ paymentHash: verified.paymentHash, executionId, reason: settlement.errorReason ?? "payment_settlement_failed", from: "settling" });
       else failX402PaymentGuard({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability, reason: settlement.errorReason ?? "payment_settlement_failed" });
       return { status: 402, body: { error: settlement.errorReason ?? "payment_settlement_failed", payment_settled: false } };
+    }
+
+    if (distributedMoneyEnabled()) {
+      const chain = await x402SettlementProof({
+        transaction: settlement.transaction,
+        network: requirements.network,
+        asset: requirements.asset,
+        payTo: requirements.payTo,
+        amount: requirements.amount,
+      });
+      if (chain.state === "failed") {
+        await failDistributedPayment({ paymentHash: verified.paymentHash, executionId, reason: `settlement_proof_${chain.reason ?? "failed"}`, from: "settling" });
+        return { status: 409, body: { error: "payment_settlement_proof_failed", payment_settled: false, transaction: settlement.transaction, reason: chain.reason } };
+      }
+      if (chain.state !== "verified") {
+        await markDistributedSettlementPending({ paymentHash: verified.paymentHash, executionId, transactionReference: settlement.transaction, reason: `settlement_proof_${chain.state}${chain.reason ? `:${chain.reason}` : ""}` });
+        return { status: 503, body: { error: "payment_settlement_reconciliation_required", payment_settled: false, transaction: settlement.transaction, prior_state: "settling", reconciliation: chain.state, reason: chain.reason } };
+      }
     }
 
     const responseHeaders = { "PAYMENT-RESPONSE": x402PaymentResponseHeader(settlement), "Cache-Control": "private, no-store" };
