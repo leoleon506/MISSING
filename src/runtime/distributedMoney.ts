@@ -309,7 +309,9 @@ function leaseVars(token: string, fence = 1) {
   return { lease_token: token, lease_fence: String(fenceValue(fence)), lease_ms: String(distributedRecoveryLeaseMs()) };
 }
 
-const ACTIVE_LEASE_CONDITION = " AND lease_token=:'lease_token' AND lease_fence=:'lease_fence'::bigint AND lease_expires_at > NOW()";
+function activeLeaseCondition(leaseFence?: number) {
+  return ` AND lease_token=:'lease_token'${leaseFence === undefined ? "" : " AND lease_fence=:'lease_fence'::bigint"} AND lease_expires_at > NOW()`;
+}
 
 export async function reserveDistributedPayment(args: { paymentHash: string; requestHash: string; executionId: string; capability: string }) {
   await ensureReady();
@@ -341,7 +343,7 @@ export async function markDistributedPaymentExecuting(args: { paymentHash: strin
     payment_hash: args.paymentHash, execution_id: args.executionId, recipe_fingerprint: args.recipeFingerprint,
     recovery_mode: args.recoveryMode, provider_idempotency_key: args.providerIdempotencyKey ?? "", ...leaseVars(token, fence),
   };
-  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='executing',updated_at=NOW(),reason=NULL,provider_recipe_fingerprint=:'recipe_fingerprint',provider_recovery_mode=:'recovery_mode',provider_idempotency_key=NULLIF(:'provider_idempotency_key',''),lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state IN ('reserved','executing')${ACTIVE_LEASE_CONDITION} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='executing',updated_at=NOW(),reason=NULL,provider_recipe_fingerprint=:'recipe_fingerprint',provider_recovery_mode=:'recovery_mode',provider_idempotency_key=NULLIF(:'provider_idempotency_key',''),lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state IN ('reserved','executing')${activeLeaseCondition(args.leaseFence)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   await refreshSnapshot();
   const rec = parseRecordLine(stdout.trim());
   return { changed: Boolean(rec), record: rec, leaseToken: rec ? token : null, leaseFence: rec?.lease_fence ?? null };
@@ -358,7 +360,7 @@ export async function markDistributedProviderDone(args: { paymentHash: string; e
     unknown_attempts: String(args.unknownProviderCostAttempts), resolution_b64: Buffer.from(JSON.stringify(args.resolution), "utf8").toString("base64"), network: args.network,
     ...leaseVars(token, fence),
   };
-  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='provider_done',updated_at=NOW(),reason=NULL,customer_price_microusd=:'customer_price'::bigint,provider_cost_microusd=NULLIF(:'provider_cost','')::bigint,gross_margin_microusd=NULLIF(:'gross_margin','')::bigint,provider_attempts=:'provider_attempts'::int,unknown_provider_cost_attempts=:'unknown_attempts'::int,resolution_json=convert_from(decode(:'resolution_b64','base64'),'UTF8'),network=:'network',lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='executing'${ACTIVE_LEASE_CONDITION} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='provider_done',updated_at=NOW(),reason=NULL,customer_price_microusd=:'customer_price'::bigint,provider_cost_microusd=NULLIF(:'provider_cost','')::bigint,gross_margin_microusd=NULLIF(:'gross_margin','')::bigint,provider_attempts=:'provider_attempts'::int,unknown_provider_cost_attempts=:'unknown_attempts'::int,resolution_json=convert_from(decode(:'resolution_b64','base64'),'UTF8'),network=:'network',lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='executing'${activeLeaseCondition(args.leaseFence)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   await refreshSnapshot();
   const rec = parseRecordLine(stdout.trim());
   return { changed: Boolean(rec), record: rec, leaseToken: rec ? token : null, leaseFence: rec?.lease_fence ?? null };
@@ -375,7 +377,7 @@ export async function markDistributedPaymentSettling(args: { paymentHash: string
     unknown_attempts: String(args.unknownProviderCostAttempts), resolution_b64: Buffer.from(JSON.stringify(args.resolution), "utf8").toString("base64"), network: args.network,
     settlement_intent_id: args.settlementIntentId ?? "", ...leaseVars(token, fence),
   };
-  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='settling',updated_at=NOW(),reason=NULL,customer_price_microusd=:'customer_price'::bigint,provider_cost_microusd=NULLIF(:'provider_cost','')::bigint,gross_margin_microusd=NULLIF(:'gross_margin','')::bigint,provider_attempts=:'provider_attempts'::int,unknown_provider_cost_attempts=:'unknown_attempts'::int,resolution_json=convert_from(decode(:'resolution_b64','base64'),'UTF8'),network=:'network',settlement_intent_id=COALESCE(NULLIF(:'settlement_intent_id',''),settlement_intent_id),lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state IN ('reserved','provider_done')${ACTIVE_LEASE_CONDITION} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='settling',updated_at=NOW(),reason=NULL,customer_price_microusd=:'customer_price'::bigint,provider_cost_microusd=NULLIF(:'provider_cost','')::bigint,gross_margin_microusd=NULLIF(:'gross_margin','')::bigint,provider_attempts=:'provider_attempts'::int,unknown_provider_cost_attempts=:'unknown_attempts'::int,resolution_json=convert_from(decode(:'resolution_b64','base64'),'UTF8'),network=:'network',settlement_intent_id=COALESCE(NULLIF(:'settlement_intent_id',''),settlement_intent_id),lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state IN ('reserved','provider_done')${activeLeaseCondition(args.leaseFence)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   await refreshSnapshot();
   const rec = parseRecordLine(stdout.trim());
   return { changed: Boolean(rec), record: rec, leaseToken: rec ? token : null, leaseFence: rec?.lease_fence ?? null };
@@ -386,7 +388,7 @@ export async function markDistributedSettlementPending(args: { paymentHash: stri
   const token = args.leaseToken ?? args.executionId;
   const fence = fenceValue(args.leaseFence);
   const vars = { payment_hash: args.paymentHash, execution_id: args.executionId, reason: args.reason, transaction_reference: args.transactionReference, ...leaseVars(token, fence) };
-  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET updated_at=NOW(),reason=:'reason',transaction_reference=:'transaction_reference',lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='settling'${ACTIVE_LEASE_CONDITION} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET updated_at=NOW(),reason=:'reason',transaction_reference=:'transaction_reference',lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='settling'${activeLeaseCondition(args.leaseFence)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   await refreshSnapshot(); const rec = parseRecordLine(stdout.trim()); return { changed: Boolean(rec), record: rec, leaseToken: rec ? token : null, leaseFence: rec?.lease_fence ?? null };
 }
 
@@ -395,7 +397,7 @@ export async function markDistributedPaymentAmbiguous(args: { paymentHash: strin
   const token = args.leaseToken ?? args.executionId;
   const fence = fenceValue(args.leaseFence);
   const vars = { payment_hash: args.paymentHash, execution_id: args.executionId, reason: args.reason, from_state: args.from ?? "executing", ...leaseVars(token, fence) };
-  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='ambiguous',updated_at=NOW(),reason=:'reason',lease_token=NULL,lease_expires_at=NULL WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state=:'from_state'${ACTIVE_LEASE_CONDITION} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='ambiguous',updated_at=NOW(),reason=:'reason',lease_token=NULL,lease_expires_at=NULL WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state=:'from_state'${activeLeaseCondition(args.leaseFence)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   await refreshSnapshot(); const rec = parseRecordLine(stdout.trim()); return { changed: Boolean(rec), record: rec };
 }
 
@@ -404,7 +406,7 @@ export async function failDistributedPayment(args: { paymentHash: string; execut
   const token = args.leaseToken ?? args.executionId;
   const fence = fenceValue(args.leaseFence);
   const vars = { payment_hash: args.paymentHash, execution_id: args.executionId, reason: args.reason, from_state: args.from ?? "reserved", ...leaseVars(token, fence) };
-  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='failed',updated_at=NOW(),reason=:'reason',lease_token=NULL,lease_expires_at=NULL WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state=:'from_state'${ACTIVE_LEASE_CONDITION} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='failed',updated_at=NOW(),reason=:'reason',lease_token=NULL,lease_expires_at=NULL WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state=:'from_state'${activeLeaseCondition(args.leaseFence)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   await refreshSnapshot(); const rec = parseRecordLine(stdout.trim()); return { changed: Boolean(rec), record: rec };
 }
 
@@ -419,7 +421,7 @@ export async function settleDistributedPayment(args: { paymentHash: string; exec
     body_b64: cache ? Buffer.from(JSON.stringify(args.responseBody), "utf8").toString("base64") : "",
     ...leaseVars(token, fence),
   };
-  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='settled',updated_at=NOW(),reason=NULL,transaction_reference=:'transaction_reference',response_status=:'response_status'::int,response_headers_json=CASE WHEN :'headers_b64'='' THEN NULL ELSE convert_from(decode(:'headers_b64','base64'),'UTF8') END,response_body_json=CASE WHEN :'body_b64'='' THEN NULL ELSE convert_from(decode(:'body_b64','base64'),'UTF8') END,lease_token=NULL,lease_expires_at=NULL WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='settling'${ACTIVE_LEASE_CONDITION} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='settled',updated_at=NOW(),reason=NULL,transaction_reference=:'transaction_reference',response_status=:'response_status'::int,response_headers_json=CASE WHEN :'headers_b64'='' THEN NULL ELSE convert_from(decode(:'headers_b64','base64'),'UTF8') END,response_body_json=CASE WHEN :'body_b64'='' THEN NULL ELSE convert_from(decode(:'body_b64','base64'),'UTF8') END,lease_token=NULL,lease_expires_at=NULL WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='settling'${activeLeaseCondition(args.leaseFence)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   await refreshSnapshot(); const rec = parseRecordLine(stdout.trim()); return { changed: Boolean(rec), record: rec };
 }
 
