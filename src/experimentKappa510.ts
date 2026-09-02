@@ -15,9 +15,11 @@ import {
 } from "./runtime/distributedMoney.js";
 import { agentRequestHash } from "./runtime/requestBinding.js";
 
+const LEASE_MS = 1000;
+const EXPIRY_WAIT_MS = LEASE_MS + 250;
 process.env.MISSING_DISTRIBUTED_MONEY_ENABLED = "1";
 process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED = "0";
-process.env.MISSING_X402_RECOVERY_LEASE_MS = "100";
+process.env.MISSING_X402_RECOVERY_LEASE_MS = String(LEASE_MS);
 
 const capability = "country_alpha_metadata";
 const input = { country_code: "CR" };
@@ -32,7 +34,7 @@ await truncateDistributedMoney();
 const evidence: any = {
   product: "Kappa.5.10",
   invariant: "an expired or superseded lease owner cannot mutate authoritative payment state",
-  lease_ms: 100,
+  lease_ms: LEASE_MS,
   scenarios: [],
 };
 
@@ -52,7 +54,7 @@ const evidence: any = {
     leaseFence: 1,
   });
   if (!executing.changed) throw new Error("initial owner could not enter executing");
-  await sleep(130);
+  await sleep(EXPIRY_WAIT_MS);
   const nextToken = randomUUID();
   const claimed = await claimDistributedRecovery({ paymentHash: p, requestHash, leaseToken: nextToken });
   if (!claimed.claimed || claimed.leaseFence !== 2) throw new Error("expected takeover fence 2");
@@ -103,7 +105,7 @@ const evidence: any = {
   const reserved = await reserveDistributedPayment({ paymentHash: p, requestHash, executionId, capability });
   if (!reserved.reserved) throw new Error("unable to reserve ABA scenario");
   // Move ownership from the reservation token to the stable test token via an expired takeover.
-  await sleep(130);
+  await sleep(EXPIRY_WAIT_MS);
   const firstClaim = await claimDistributedRecovery({ paymentHash: p, requestHash, leaseToken: token });
   if (!firstClaim.claimed || firstClaim.leaseFence !== 2) throw new Error("expected first stable-token fence 2");
   const executing = await markDistributedPaymentExecuting({
@@ -116,7 +118,7 @@ const evidence: any = {
     leaseFence: 2,
   });
   if (!executing.changed) throw new Error("fence 2 owner could not enter executing");
-  await sleep(130);
+  await sleep(EXPIRY_WAIT_MS);
   const secondClaim = await claimDistributedRecovery({ paymentHash: p, requestHash, leaseToken: token });
   if (!secondClaim.claimed || secondClaim.leaseFence !== 3) throw new Error("expected same-token fence 3");
   const staleSameToken = await markDistributedProviderDone({
@@ -163,7 +165,7 @@ const evidence: any = {
   const executionId = randomUUID();
   const reserved = await reserveDistributedPayment({ paymentHash: p, requestHash, executionId, capability });
   if (!reserved.reserved) throw new Error("unable to reserve expiry scenario");
-  await sleep(130);
+  await sleep(EXPIRY_WAIT_MS);
   const expiredWrite = await markDistributedPaymentExecuting({
     paymentHash: p,
     executionId,
@@ -212,7 +214,7 @@ const evidence: any = {
     leaseFence: 1,
   });
   if (!settling.changed) throw new Error("unable to enter settling");
-  await sleep(130);
+  await sleep(EXPIRY_WAIT_MS);
   const token2 = randomUUID();
   const claim2 = await claimDistributedRecovery({ paymentHash: p, requestHash, leaseToken: token2 });
   if (!claim2.claimed || claim2.leaseFence !== 2) throw new Error("expected settlement fence 2");
@@ -234,7 +236,7 @@ const evidence: any = {
     leaseFence: 2,
   });
   if (!currentPending.changed) throw new Error("current owner could not persist transaction");
-  await sleep(130);
+  await sleep(EXPIRY_WAIT_MS);
   const token3 = randomUUID();
   const claim3 = await claimDistributedRecovery({ paymentHash: p, requestHash, leaseToken: token3 });
   if (!claim3.claimed || claim3.leaseFence !== 3) throw new Error("expected settlement fence 3");

@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import type { ResolveResult, VerifiedRecipe } from "./types.js";
+import { distributedMoneyEnabled, distributedMoneySnapshot } from "./distributedMoney.js";
+import { settledReorgMonitorSnapshot } from "./settledReorgMonitor.js";
+import { x402FinalityPolicy, x402RpcUrl } from "./x402Reconciliation.js";
 
 export interface X402Requirements {
   scheme: "exact";
@@ -34,6 +37,18 @@ export interface X402Settlement {
   errorMessage?: string;
 }
 
+export type ProductionAdmissionReason =
+  | "x402_static_config_not_ready"
+  | "facilitator_idempotency_contract_not_enabled"
+  | "distributed_money_not_enabled"
+  | "distributed_money_not_ready"
+  | "transactional_response_cache_not_disabled"
+  | "finality_policy_not_ready"
+  | "x402_rpc_not_configured"
+  | "settled_reorg_monitor_not_enabled"
+  | "settled_reorg_monitor_not_running"
+  | "settled_reorg_monitor_unhealthy";
+
 let facilitatorFetch: typeof fetch = (...args) => globalThis.fetch(...args);
 
 export function configureX402Fetch(fn?: typeof fetch) {
@@ -42,6 +57,10 @@ export function configureX402Fetch(fn?: typeof fetch) {
 
 export function x402Enabled(): boolean {
   return process.env.MISSING_X402_ENABLED === "1";
+}
+
+export function productionAdmissionEnabled(): boolean {
+  return process.env.MISSING_PRODUCTION_ADMISSION_ENABLED === "1";
 }
 
 /**
@@ -71,9 +90,63 @@ export function x402Config() {
   };
 }
 
-export function x402Ready(): boolean {
+function x402StaticReady(): boolean {
   const c = x402Config();
   return Boolean(c.enabled && c.network && c.asset && c.payTo && c.facilitatorUrl && Number.isInteger(c.maxTimeoutSeconds) && c.maxTimeoutSeconds > 0);
+}
+
+/**
+ * Operational Readiness 5 admission contract.
+ *
+ * The gate is opt-in so existing local/test deployments retain their historical
+ * behavior. Once enabled, paid traffic fails closed unless every production
+ * prerequisite needed by the durable x402 path is already healthy before any
+ * payment verification, provider effect, or settlement submission can occur.
+ */
+export function productionAdmissionSnapshot() {
+  const enabled = productionAdmissionEnabled();
+  const config = x402Config();
+  const distributed = distributedMoneySnapshot();
+  const monitor = settledReorgMonitorSnapshot();
+  const finality = config.network ? x402FinalityPolicy(config.network) : null;
+  const checks = {
+    x402_static_ready: x402StaticReady(),
+    facilitator_idempotency_contract: x402FacilitatorIdempotencyEnabled(),
+    distributed_money_enabled: distributedMoneyEnabled(),
+    distributed_money_ready: distributedMoneyEnabled() && distributed.ready,
+    transactional_response_cache_disabled: !distributed.response_cache_enabled,
+    finality_policy_ready: finality?.ok === true,
+    x402_rpc_configured: x402RpcUrl() !== null,
+    settled_reorg_monitor_enabled: monitor.enabled,
+    settled_reorg_monitor_running: monitor.running,
+    settled_reorg_monitor_healthy: monitor.last_error === null,
+  };
+
+  const reasons: ProductionAdmissionReason[] = [];
+  if (!checks.x402_static_ready) reasons.push("x402_static_config_not_ready");
+  if (!checks.facilitator_idempotency_contract) reasons.push("facilitator_idempotency_contract_not_enabled");
+  if (!checks.distributed_money_enabled) reasons.push("distributed_money_not_enabled");
+  if (!checks.distributed_money_ready) reasons.push("distributed_money_not_ready");
+  if (!checks.transactional_response_cache_disabled) reasons.push("transactional_response_cache_not_disabled");
+  if (!checks.finality_policy_ready) reasons.push("finality_policy_not_ready");
+  if (!checks.x402_rpc_configured) reasons.push("x402_rpc_not_configured");
+  if (!checks.settled_reorg_monitor_enabled) reasons.push("settled_reorg_monitor_not_enabled");
+  if (!checks.settled_reorg_monitor_running) reasons.push("settled_reorg_monitor_not_running");
+  if (!checks.settled_reorg_monitor_healthy) reasons.push("settled_reorg_monitor_unhealthy");
+
+  return {
+    enabled,
+    enforced: enabled,
+    ready: enabled ? reasons.length === 0 : x402StaticReady(),
+    reasons: enabled ? reasons : [],
+    checks,
+    finality_policy: finality,
+  };
+}
+
+export function x402Ready(): boolean {
+  if (!x402StaticReady()) return false;
+  return productionAdmissionEnabled() ? productionAdmissionSnapshot().ready : true;
 }
 
 export function x402Requirements(customerPriceMicrousd: number): X402Requirements | null {
