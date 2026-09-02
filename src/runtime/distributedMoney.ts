@@ -63,6 +63,13 @@ export function distributedRecoveryLeaseMs(): number {
   return positiveInteger(process.env.MISSING_X402_RECOVERY_LEASE_MS, 30_000, 100);
 }
 
+export function distributedLeaseHeartbeatMs(): number {
+  const leaseMs = distributedRecoveryLeaseMs();
+  const configured = Number(process.env.MISSING_X402_LEASE_HEARTBEAT_MS);
+  if (Number.isSafeInteger(configured) && configured >= 10 && configured < leaseMs) return configured;
+  return Math.max(10, Math.floor(leaseMs / 3));
+}
+
 function closePoolSoon() {
   const current = pool;
   pool = null;
@@ -333,6 +340,14 @@ export async function claimDistributedRecovery(args: { paymentHash: string; requ
   const rec = parseRecordLine(stdout.trim());
   await refreshSnapshot();
   return { claimed: Boolean(rec), record: rec, leaseToken: rec ? args.leaseToken : null, leaseFence: rec?.lease_fence ?? null };
+}
+
+export async function renewDistributedLease(args: { paymentHash: string; executionId: string; leaseToken: string; leaseFence: number }) {
+  await ensureReady();
+  const vars = { payment_hash: args.paymentHash, execution_id: args.executionId, ...leaseVars(args.leaseToken, args.leaseFence) };
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state IN ('reserved','executing','provider_done','settling') AND lease_token=:'lease_token' AND lease_fence=:'lease_fence'::bigint AND lease_expires_at > NOW() RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  const rec = parseRecordLine(stdout.trim());
+  return { renewed: Boolean(rec), record: rec, leaseToken: rec ? args.leaseToken : null, leaseFence: rec?.lease_fence ?? null };
 }
 
 export async function markDistributedPaymentExecuting(args: { paymentHash: string; executionId: string; recipeFingerprint: string; recoveryMode: ProviderRecoveryMode; providerIdempotencyKey?: string | null; leaseToken?: string; leaseFence?: number }) {
