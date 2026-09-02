@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { rankRecipesForExecution, recordAgentRankAttempt, selectAgentRankExplorationRecipe } from "./agentRank.js";
 import { credentialValue } from "./credentials.js";
 import { economicsEnforcementEnabled, rankRecipesByEconomics, recordEconomicsResolution } from "./economics.js";
@@ -12,15 +13,18 @@ const OPEN_MS = 60_000;
 const health = new Map<string, RuntimeHealth>();
 const explorationInFlight = new Set<string>();
 
-const FORBIDDEN_STATIC_HEADERS = new Set([
-  "authorization",
-  "proxy-authorization",
-  "cookie",
-  "set-cookie",
+const TRANSPORT_CONTROLLED_HEADERS = new Set([
   "host",
   "content-length",
   "connection",
   "transfer-encoding",
+]);
+
+const SENSITIVE_RECIPE_HEADERS = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
 ]);
 
 function stateFor(recipe: VerifiedRecipe): RuntimeHealth {
@@ -46,6 +50,10 @@ function stateFor(recipe: VerifiedRecipe): RuntimeHealth {
   return created;
 }
 
+function effectiveInput(recipe: VerifiedRecipe, input: RuntimeInput): RuntimeInput {
+  return recipe.forced_inputs ? { ...input, ...recipe.forced_inputs } : input;
+}
+
 function bindingValue(ref: string, input: RuntimeInput): unknown {
   const match = /^\$input\.([A-Za-z0-9_]+)$/.exec(ref);
   if (!match) throw new Error(`Unsupported binding reference: ${ref}`);
@@ -55,22 +63,37 @@ function bindingValue(ref: string, input: RuntimeInput): unknown {
 }
 
 export function renderRecipeUrl(recipe: VerifiedRecipe, input: RuntimeInput): string {
+  const boundInput = effectiveInput(recipe, input);
   let path = recipe.path_template;
   for (const [slot, ref] of Object.entries(recipe.path_bindings)) {
-    path = path.replace(`{${slot}}`, encodeURIComponent(String(bindingValue(ref, input))));
+    path = path.replace(`{${slot}}`, encodeURIComponent(String(bindingValue(ref, boundInput))));
   }
   const url = new URL(path, recipe.base_url);
   for (const [key, ref] of Object.entries(recipe.query_bindings)) {
-    url.searchParams.set(key, String(bindingValue(ref, input)));
+    url.searchParams.set(key, String(bindingValue(ref, boundInput)));
   }
   return url.toString();
 }
 
-function validateStaticHeaderName(name: string) {
+function validateHeaderName(name: string, kind: "static" | "generated" | "credential") {
   const normalized = name.trim().toLowerCase();
-  if (!normalized || !/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(normalized)) throw new Error(`Invalid static header name: ${name}`);
-  if (FORBIDDEN_STATIC_HEADERS.has(normalized) || /(?:api[-_]?key|token|secret)/i.test(normalized)) {
+  if (!normalized || !/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(normalized)) throw new Error(`Invalid ${kind} header name: ${name}`);
+  if (TRANSPORT_CONTROLLED_HEADERS.has(normalized)) throw new Error(`Transport-controlled header cannot be set by recipe: ${name}`);
+  return normalized;
+}
+
+function validateStaticHeaderName(name: string) {
+  const normalized = validateHeaderName(name, "static");
+  if (SENSITIVE_RECIPE_HEADERS.has(normalized) || /(?:api[-_]?key|token|secret)/i.test(normalized)) {
     throw new Error(`Sensitive or transport-controlled header must use a credential binding: ${name}`);
+  }
+  return normalized;
+}
+
+function validateGeneratedHeaderName(name: string) {
+  const normalized = validateHeaderName(name, "generated");
+  if (SENSITIVE_RECIPE_HEADERS.has(normalized) || /(?:api[-_]?key|token|secret)/i.test(normalized)) {
+    throw new Error(`Sensitive header cannot use a generated binding: ${name}`);
   }
   return normalized;
 }
@@ -84,11 +107,16 @@ function renderHeaders(recipe: VerifiedRecipe): Record<string, string> {
   }
   for (const binding of recipe.credential_bindings ?? []) {
     if (binding.location !== "header" || !binding.name.trim() || !binding.credential_key.trim()) throw new Error("Invalid credential binding");
-    const normalized = binding.name.trim().toLowerCase();
-    if (!/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(normalized)) throw new Error(`Invalid credential header name: ${binding.name}`);
+    const normalized = validateHeaderName(binding.name, "credential");
     const secret = credentialValue(binding.credential_key);
     if (!secret) throw new Error(`Missing runtime credential: ${binding.credential_key}`);
     headers[normalized] = `${binding.prefix ?? ""}${secret}`;
+  }
+  for (const binding of recipe.generated_headers ?? []) {
+    if (binding.location !== "header" || binding.generator !== "uuid_v4") throw new Error("Invalid generated header binding");
+    const normalized = validateGeneratedHeaderName(binding.name);
+    if (headers[normalized] !== undefined) throw new Error(`Generated header conflicts with another recipe header: ${binding.name}`);
+    headers[normalized] = randomUUID();
   }
   return headers;
 }
@@ -99,10 +127,11 @@ function renderJsonBody(recipe: VerifiedRecipe, input: RuntimeInput): string | u
     if (Object.keys(bindings).length) throw new Error("GET recipes cannot define body_bindings");
     return undefined;
   }
+  const boundInput = effectiveInput(recipe, input);
   const body: Record<string, unknown> = {};
   for (const [field, ref] of Object.entries(bindings)) {
     if (!field.trim()) throw new Error("POST body binding field cannot be empty");
-    body[field] = bindingValue(ref, input);
+    body[field] = bindingValue(ref, boundInput);
   }
   return JSON.stringify(body);
 }
@@ -133,9 +162,10 @@ function readPath(value: unknown, path: string): unknown {
 }
 
 export function projectRecipeOutput(recipe: VerifiedRecipe, input: RuntimeInput, payload: unknown): Record<string, unknown> {
+  const boundInput = effectiveInput(recipe, input);
   const output: Record<string, unknown> = {};
   for (const [key, rule] of Object.entries(recipe.projection)) {
-    output[key] = rule.op === "INPUT" ? input[rule.name] : readPath(payload, rule.path);
+    output[key] = rule.op === "INPUT" ? boundInput[rule.name] : readPath(payload, rule.path);
   }
   const missing = recipe.required.filter(key => output[key] === undefined || output[key] === null || output[key] === "");
   if (missing.length) throw new Error(`Projection missing required outputs: ${missing.join(",")}`);

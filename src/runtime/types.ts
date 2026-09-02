@@ -4,6 +4,24 @@ export type ProjectionRule =
   | { op: "INPUT"; name: string }
   | { op: "FIELD"; path: string };
 
+export interface SafePostReplaySignalEvidence {
+  kind: "sandbox_server" | "dry_run_control" | "test_mode_control" | "provider_safe_declaration" | "idempotency_key";
+  sufficient: boolean;
+  source: string;
+  detail: string;
+  location?: "query" | "header" | "body";
+  name?: string;
+  input_name?: string;
+  safe_value?: boolean;
+}
+
+export interface SafePostReplayEvidence {
+  policy: "lambda2";
+  signals: SafePostReplaySignalEvidence[];
+  input_overrides: RuntimeInput;
+  generated_headers: string[];
+}
+
 export type RecipeVerification =
   | {
       status: "replay_verified";
@@ -18,6 +36,7 @@ export type RecipeVerification =
       verification_inputs: RuntimeInput[];
       verified_at: string;
       evidence_url: string;
+      safe_post?: SafePostReplayEvidence;
     };
 
 export type HttpMethod = "GET" | "POST";
@@ -27,6 +46,12 @@ export interface CredentialBinding {
   name: string;
   credential_key: string;
   prefix?: string;
+}
+
+export interface GeneratedHeaderBinding {
+  location: "header";
+  name: string;
+  generator: "uuid_v4";
 }
 
 export interface VerifiedRecipe {
@@ -46,6 +71,10 @@ export interface VerifiedRecipe {
   static_headers?: Record<string, string>;
   /** References to credentials resolved only at execution time. */
   credential_bindings?: CredentialBinding[];
+  /** Non-secret per-request headers such as Idempotency-Key. */
+  generated_headers?: GeneratedHeaderBinding[];
+  /** Values that callers cannot override. Used to preserve verified safe-mode controls. */
+  forced_inputs?: RuntimeInput;
   projection: Record<string, ProjectionRule>;
   required: string[];
   example_input: RuntimeInput;

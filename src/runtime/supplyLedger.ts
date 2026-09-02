@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { demandLedgerPath } from "./demandLedger.js";
-import type { CredentialBinding, VerifiedRecipe } from "./types.js";
+import type { CredentialBinding, GeneratedHeaderBinding, VerifiedRecipe } from "./types.js";
 
 export interface SupplyLedgerEvent {
   version: 1;
@@ -24,9 +24,14 @@ export function configureSupplyLedger(path: string | null | undefined) {
   overridePath = path === undefined ? undefined : path === null ? null : resolve(path);
 }
 
-function stringRecord(value: unknown): value is Record<string, string> {
+function plainRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
-    && Object.entries(value as Record<string, unknown>).every(([key, item]) => Boolean(key) && typeof item === "string");
+    && Object.keys(value as Record<string, unknown>).every(key => Boolean(key));
+}
+
+function stringRecord(value: unknown): value is Record<string, string> {
+  return plainRecord(value)
+    && Object.entries(value).every(([, item]) => typeof item === "string");
 }
 
 function credentialBindings(value: unknown): value is CredentialBinding[] {
@@ -38,6 +43,15 @@ function credentialBindings(value: unknown): value is CredentialBinding[] {
     && typeof (item as Partial<CredentialBinding>).credential_key === "string"
     && Boolean((item as Partial<CredentialBinding>).credential_key?.trim())
     && ((item as Partial<CredentialBinding>).prefix === undefined || typeof (item as Partial<CredentialBinding>).prefix === "string"));
+}
+
+function generatedHeaderBindings(value: unknown): value is GeneratedHeaderBinding[] {
+  if (!Array.isArray(value)) return false;
+  return value.every(item => !!item && typeof item === "object"
+    && (item as Partial<GeneratedHeaderBinding>).location === "header"
+    && typeof (item as Partial<GeneratedHeaderBinding>).name === "string"
+    && Boolean((item as Partial<GeneratedHeaderBinding>).name?.trim())
+    && (item as Partial<GeneratedHeaderBinding>).generator === "uuid_v4");
 }
 
 function isVerifiedRecipe(value: unknown): value is VerifiedRecipe {
@@ -55,6 +69,8 @@ function isVerifiedRecipe(value: unknown): value is VerifiedRecipe {
     && (recipe.body_bindings === undefined || stringRecord(recipe.body_bindings))
     && (recipe.static_headers === undefined || stringRecord(recipe.static_headers))
     && (recipe.credential_bindings === undefined || credentialBindings(recipe.credential_bindings))
+    && (recipe.generated_headers === undefined || generatedHeaderBindings(recipe.generated_headers))
+    && (recipe.forced_inputs === undefined || plainRecord(recipe.forced_inputs))
     && !!recipe.verification
     && recipe.verification.status === "replay_verified";
 }
