@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { demandLedgerPath } from "./demandLedger.js";
-import type { CredentialBinding, VerifiedRecipe } from "./types.js";
+import type { CredentialBinding, GeneratedHeaderBinding, VerifiedRecipe } from "./types.js";
 
 export interface SupplyLedgerEvent {
   version: 1;
@@ -40,6 +40,15 @@ function credentialBindings(value: unknown): value is CredentialBinding[] {
     && ((item as Partial<CredentialBinding>).prefix === undefined || typeof (item as Partial<CredentialBinding>).prefix === "string"));
 }
 
+function generatedHeaderBindings(value: unknown): value is GeneratedHeaderBinding[] {
+  if (!Array.isArray(value)) return false;
+  return value.every(item => !!item && typeof item === "object"
+    && (item as Partial<GeneratedHeaderBinding>).location === "header"
+    && typeof (item as Partial<GeneratedHeaderBinding>).name === "string"
+    && Boolean((item as Partial<GeneratedHeaderBinding>).name?.trim())
+    && (item as Partial<GeneratedHeaderBinding>).generator === "uuid_v4");
+}
+
 function isVerifiedRecipe(value: unknown): value is VerifiedRecipe {
   if (!value || typeof value !== "object") return false;
   const recipe = value as Partial<VerifiedRecipe>;
@@ -55,6 +64,7 @@ function isVerifiedRecipe(value: unknown): value is VerifiedRecipe {
     && (recipe.body_bindings === undefined || stringRecord(recipe.body_bindings))
     && (recipe.static_headers === undefined || stringRecord(recipe.static_headers))
     && (recipe.credential_bindings === undefined || credentialBindings(recipe.credential_bindings))
+    && (recipe.generated_headers === undefined || generatedHeaderBindings(recipe.generated_headers))
     && !!recipe.verification
     && recipe.verification.status === "replay_verified";
 }
