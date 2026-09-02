@@ -47,6 +47,10 @@ function stateFor(recipe: VerifiedRecipe): RuntimeHealth {
   return created;
 }
 
+function effectiveInput(recipe: VerifiedRecipe, input: RuntimeInput): RuntimeInput {
+  return recipe.forced_inputs ? { ...input, ...recipe.forced_inputs } : input;
+}
+
 function bindingValue(ref: string, input: RuntimeInput): unknown {
   const match = /^\$input\.([A-Za-z0-9_]+)$/.exec(ref);
   if (!match) throw new Error(`Unsupported binding reference: ${ref}`);
@@ -56,13 +60,14 @@ function bindingValue(ref: string, input: RuntimeInput): unknown {
 }
 
 export function renderRecipeUrl(recipe: VerifiedRecipe, input: RuntimeInput): string {
+  const boundInput = effectiveInput(recipe, input);
   let path = recipe.path_template;
   for (const [slot, ref] of Object.entries(recipe.path_bindings)) {
-    path = path.replace(`{${slot}}`, encodeURIComponent(String(bindingValue(ref, input))));
+    path = path.replace(`{${slot}}`, encodeURIComponent(String(bindingValue(ref, boundInput))));
   }
   const url = new URL(path, recipe.base_url);
   for (const [key, ref] of Object.entries(recipe.query_bindings)) {
-    url.searchParams.set(key, String(bindingValue(ref, input)));
+    url.searchParams.set(key, String(bindingValue(ref, boundInput)));
   }
   return url.toString();
 }
@@ -109,10 +114,11 @@ function renderJsonBody(recipe: VerifiedRecipe, input: RuntimeInput): string | u
     if (Object.keys(bindings).length) throw new Error("GET recipes cannot define body_bindings");
     return undefined;
   }
+  const boundInput = effectiveInput(recipe, input);
   const body: Record<string, unknown> = {};
   for (const [field, ref] of Object.entries(bindings)) {
     if (!field.trim()) throw new Error("POST body binding field cannot be empty");
-    body[field] = bindingValue(ref, input);
+    body[field] = bindingValue(ref, boundInput);
   }
   return JSON.stringify(body);
 }
@@ -143,9 +149,10 @@ function readPath(value: unknown, path: string): unknown {
 }
 
 export function projectRecipeOutput(recipe: VerifiedRecipe, input: RuntimeInput, payload: unknown): Record<string, unknown> {
+  const boundInput = effectiveInput(recipe, input);
   const output: Record<string, unknown> = {};
   for (const [key, rule] of Object.entries(recipe.projection)) {
-    output[key] = rule.op === "INPUT" ? input[rule.name] : readPath(payload, rule.path);
+    output[key] = rule.op === "INPUT" ? boundInput[rule.name] : readPath(payload, rule.path);
   }
   const missing = recipe.required.filter(key => output[key] === undefined || output[key] === null || output[key] === "");
   if (missing.length) throw new Error(`Projection missing required outputs: ${missing.join(",")}`);
