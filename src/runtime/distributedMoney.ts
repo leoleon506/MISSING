@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { Pool, type PoolConfig, type QueryResultRow } from "pg";
 import type { TransactionalPaymentRecord } from "./transactionalMoney.js";
 
 export interface DistributedPaymentRecord extends TransactionalPaymentRecord {
@@ -11,12 +11,17 @@ export interface DistributedPaymentRecord extends TransactionalPaymentRecord {
 type ExecResult = { stdout: string; stderr: string };
 type ExecFn = (sql: string, vars?: Record<string, string>) => Promise<ExecResult>;
 let execOverride: ExecFn | null | undefined;
+let pool: Pool | null = null;
 let initialized = false;
+let initializing: Promise<void> | null = null;
 let snapshot = {
   enabled: false,
   ready: false,
-  backend: "postgres-psql" as const,
+  backend: "postgres-native" as const,
   response_cache_enabled: false,
+  pool_total: 0,
+  pool_idle: 0,
+  pool_waiting: 0,
   payments: 0,
   request_bound: 0,
   legacy_unbound: 0,
@@ -35,14 +40,30 @@ export function distributedMoneyDatabaseUrl(): string | null {
   return value || null;
 }
 
+function positiveInteger(value: string | undefined, fallback: number, minimum = 1): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= minimum ? parsed : fallback;
+}
+
+function closePoolSoon() {
+  const current = pool;
+  pool = null;
+  if (current) void current.end().catch(() => undefined);
+}
+
 export function configureDistributedMoneyExecForTest(value: ExecFn | null | undefined) {
+  closePoolSoon();
   execOverride = value;
   initialized = false;
+  initializing = null;
   snapshot = {
     enabled: distributedMoneyEnabled(),
     ready: false,
-    backend: "postgres-psql",
+    backend: "postgres-native",
     response_cache_enabled: process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED === "1",
+    pool_total: 0,
+    pool_idle: 0,
+    pool_waiting: 0,
     payments: 0,
     request_bound: 0,
     legacy_unbound: 0,
@@ -53,21 +74,58 @@ export function configureDistributedMoneyExecForTest(value: ExecFn | null | unde
   };
 }
 
-function pgEnv(): NodeJS.ProcessEnv {
+function poolConfig(): PoolConfig {
   const raw = distributedMoneyDatabaseUrl();
   if (!raw) throw new Error("MISSING distributed money requires MISSING_POSTGRES_URL or DATABASE_URL");
   const url = new URL(raw);
   if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") throw new Error("Invalid PostgreSQL URL protocol");
-  const sslmode = process.env.MISSING_POSTGRES_SSLMODE?.trim() || url.searchParams.get("sslmode") || "prefer";
+  const explicitSslmode = process.env.MISSING_POSTGRES_SSLMODE?.trim();
+  if (explicitSslmode) url.searchParams.set("sslmode", explicitSslmode);
+  const timeout = positiveInteger(process.env.MISSING_POSTGRES_TIMEOUT_MS, 10000);
   return {
-    ...process.env,
-    PGHOST: url.hostname,
-    PGPORT: url.port || "5432",
-    PGDATABASE: decodeURIComponent(url.pathname.replace(/^\//, "")),
-    PGUSER: decodeURIComponent(url.username),
-    PGPASSWORD: decodeURIComponent(url.password),
-    PGSSLMODE: sslmode,
+    connectionString: url.toString(),
+    max: positiveInteger(process.env.MISSING_POSTGRES_POOL_MAX, 10),
+    idleTimeoutMillis: positiveInteger(process.env.MISSING_POSTGRES_IDLE_TIMEOUT_MS, 30000),
+    connectionTimeoutMillis: timeout,
+    query_timeout: timeout,
+    statement_timeout: timeout,
+    application_name: process.env.MISSING_POSTGRES_APPLICATION_NAME?.trim() || "missing-distributed-money",
   };
+}
+
+function nativePool(): Pool {
+  if (pool) return pool;
+  const created = new Pool(poolConfig());
+  created.on("error", () => {
+    snapshot = { ...snapshot, ready: false };
+  });
+  pool = created;
+  return created;
+}
+
+function parameterize(sql: string, vars: Record<string, string>): { text: string; values: string[] } {
+  const indexes = new Map<string, number>();
+  const values: string[] = [];
+  const text = sql.replace(/:'([A-Za-z_][A-Za-z0-9_]*)'/g, (_match, key: string) => {
+    if (!Object.prototype.hasOwnProperty.call(vars, key)) throw new Error(`Missing PostgreSQL variable: ${key}`);
+    let index = indexes.get(key);
+    if (!index) {
+      values.push(vars[key]);
+      index = values.length;
+      indexes.set(key, index);
+    }
+    return `$${index}`;
+  });
+  return { text, values };
+}
+
+function stdoutFromRows(rows: QueryResultRow[]): string {
+  if (rows.length === 0) return "";
+  return rows.map(row => {
+    const values = Object.values(row);
+    const value = values.length === 1 ? values[0] : row;
+    return typeof value === "string" ? value : JSON.stringify(value);
+  }).join("\n") + "\n";
 }
 
 async function run(sql: string, vars: Record<string, string> = {}): Promise<ExecResult> {
@@ -75,20 +133,14 @@ async function run(sql: string, vars: Record<string, string> = {}): Promise<Exec
     if (!execOverride) throw new Error("distributed money test executor is unavailable");
     return execOverride(sql, vars);
   }
-  const args = ["-X", "-qAt", "-v", "ON_ERROR_STOP=1"];
-  for (const [key, value] of Object.entries(vars)) args.push("-v", `${key}=${value}`);
-  const result = spawnSync(process.env.MISSING_PSQL_BIN?.trim() || "psql", args, {
-    env: pgEnv(),
-    input: sql,
-    encoding: "utf8",
-    maxBuffer: 4 * 1024 * 1024,
-    timeout: Number(process.env.MISSING_POSTGRES_TIMEOUT_MS ?? 10000),
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`psql failed with exit ${result.status}: ${(result.stderr || "").trim()}`);
-  }
-  return { stdout: result.stdout || "", stderr: result.stderr || "" };
+  const query = parameterize(sql, vars);
+  const result = await nativePool().query(query.text, query.values) as unknown as
+    | { rows?: QueryResultRow[] }
+    | Array<{ rows?: QueryResultRow[] }>;
+  const rows = Array.isArray(result)
+    ? result.flatMap(item => item.rows ?? [])
+    : result.rows ?? [];
+  return { stdout: stdoutFromRows(rows), stderr: "" };
 }
 
 const SCHEMA_SQL = `
@@ -146,13 +198,18 @@ function parseRecordLine(line: string): DistributedPaymentRecord | null {
   };
 }
 
+function poolSnapshot() {
+  return pool ? { pool_total: pool.totalCount, pool_idle: pool.idleCount, pool_waiting: pool.waitingCount } : { pool_total: 0, pool_idle: 0, pool_waiting: 0 };
+}
+
 async function refreshSnapshot() {
-  if (!distributedMoneyEnabled()) return snapshot = { ...snapshot, enabled: false, ready: false };
+  if (!distributedMoneyEnabled()) return snapshot = { ...snapshot, enabled: false, ready: false, ...poolSnapshot() };
   const { stdout } = await run(`SELECT row_to_json(x) FROM (SELECT COUNT(*)::bigint AS payments, COUNT(*) FILTER (WHERE request_hash IS NOT NULL)::bigint AS request_bound, COUNT(*) FILTER (WHERE request_hash IS NULL)::bigint AS legacy_unbound, COUNT(*) FILTER (WHERE state='reserved')::bigint AS reserved, COUNT(*) FILTER (WHERE state='settling')::bigint AS settling, COUNT(*) FILTER (WHERE state='settled')::bigint AS settled, COUNT(*) FILTER (WHERE state='failed')::bigint AS failed FROM missing_x402_payments) x;`);
   const row = stdout.trim() ? JSON.parse(stdout.trim()) as Record<string, unknown> : {};
   snapshot = {
-    enabled: true, ready: true, backend: "postgres-psql",
+    enabled: true, ready: true, backend: "postgres-native",
     response_cache_enabled: process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED === "1",
+    ...poolSnapshot(),
     payments: integer(row.payments) ?? 0, request_bound: integer(row.request_bound) ?? 0, legacy_unbound: integer(row.legacy_unbound) ?? 0,
     reserved: integer(row.reserved) ?? 0, settling: integer(row.settling) ?? 0,
     settled: integer(row.settled) ?? 0, failed: integer(row.failed) ?? 0,
@@ -161,13 +218,22 @@ async function refreshSnapshot() {
 }
 
 export async function initializeDistributedMoney() {
-  if (!distributedMoneyEnabled()) return snapshot = { ...snapshot, enabled: false, ready: false };
-  await run(SCHEMA_SQL);
-  initialized = true;
+  if (!distributedMoneyEnabled()) return snapshot = { ...snapshot, enabled: false, ready: false, ...poolSnapshot() };
+  if (!initializing) {
+    initializing = (async () => {
+      await run(SCHEMA_SQL);
+      initialized = true;
+    })().finally(() => { initializing = null; });
+  }
+  await initializing;
   return refreshSnapshot();
 }
 
-async function ensureReady() { if (!initialized) await initializeDistributedMoney(); }
+async function ensureReady() {
+  if (initialized) return;
+  if (initializing) await initializing;
+  else await initializeDistributedMoney();
+}
 
 export async function distributedPayment(paymentHash: string): Promise<DistributedPaymentRecord | null> {
   if (!distributedMoneyEnabled()) return null;
@@ -230,6 +296,20 @@ export function cachedDistributedResponse(value: DistributedPaymentRecord) {
   try { return { status: value.response_status, headers: value.response_headers_json ? JSON.parse(value.response_headers_json) as Record<string, string> : {}, body: JSON.parse(value.response_body_json) as unknown }; } catch { return null; }
 }
 
-export function distributedMoneySnapshot() { return { ...snapshot, enabled: distributedMoneyEnabled(), response_cache_enabled: process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED === "1" }; }
-export async function truncateDistributedMoney() { if (!distributedMoneyEnabled()) return; await ensureReady(); await run("DELETE FROM missing_x402_payments;"); await refreshSnapshot(); }
-export function closeDistributedMoney() { initialized = false; }
+export function distributedMoneySnapshot() {
+  return { ...snapshot, ...poolSnapshot(), enabled: distributedMoneyEnabled(), response_cache_enabled: process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED === "1" };
+}
+
+export async function truncateDistributedMoney() {
+  if (!distributedMoneyEnabled()) return;
+  await ensureReady();
+  await run("DELETE FROM missing_x402_payments;");
+  await refreshSnapshot();
+}
+
+export function closeDistributedMoney() {
+  initialized = false;
+  initializing = null;
+  closePoolSoon();
+  snapshot = { ...snapshot, ready: false, pool_total: 0, pool_idle: 0, pool_waiting: 0 };
+}

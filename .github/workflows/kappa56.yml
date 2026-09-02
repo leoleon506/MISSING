@@ -1,0 +1,46 @@
+name: Kappa.5.6 Native PostgreSQL Pooling
+on:
+  push:
+    branches: [product-kappa56-native-postgres-pooling]
+  pull_request:
+    branches: [main]
+
+jobs:
+  native-postgres-pooling:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: missing
+          POSTGRES_PASSWORD: missing
+          POSTGRES_DB: missing_kappa56
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U missing -d missing_kappa56"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: Kappa.5.6 native PostgreSQL integration proof
+        env:
+          MISSING_KAPPA56_INTEGRATION: "1"
+          MISSING_DISTRIBUTED_MONEY_ENABLED: "1"
+          MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED: "0"
+          MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_kappa56?sslmode=disable
+          MISSING_POSTGRES_SSLMODE: disable
+          MISSING_POSTGRES_POOL_MAX: "4"
+          MISSING_POSTGRES_TIMEOUT_MS: "10000"
+          MISSING_PSQL_BIN: /definitely/not-used
+        run: npx vitest run tests/productKappa56NativePostgres.test.ts
+      - name: TypeScript build
+        run: npm run build
