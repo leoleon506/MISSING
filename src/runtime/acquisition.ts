@@ -3,7 +3,7 @@ import { isIP } from "node:net";
 import { demandSnapshot, type DemandObservation } from "./discovery.js";
 import { attemptRecipe } from "./executor.js";
 import { recipesForCapability, registerPromotedRecipe } from "./recipes.js";
-import type { HttpMethod, ProjectionRule, RuntimeAttempt, RuntimeInput, VerifiedRecipe } from "./types.js";
+import type { GeneratedHeaderBinding, HttpMethod, ProjectionRule, RuntimeAttempt, RuntimeInput, SafePostReplayEvidence, VerifiedRecipe } from "./types.js";
 
 export interface SupplyOpportunity {
   intent: string;
@@ -30,6 +30,7 @@ export interface SupplyCandidate {
   path_bindings: Record<string, string>;
   query_bindings: Record<string, string>;
   body_bindings?: Record<string, string>;
+  generated_headers?: GeneratedHeaderBinding[];
   projection: Record<string, ProjectionRule>;
   required: string[];
   verification_inputs: RuntimeInput[];
@@ -79,6 +80,7 @@ function recipeMaterial(candidate: SupplyCandidate) {
     path_bindings: candidate.path_bindings,
     query_bindings: candidate.query_bindings,
     ...(candidate.body_bindings ? { body_bindings: candidate.body_bindings } : {}),
+    ...(candidate.generated_headers?.length ? { generated_headers: candidate.generated_headers } : {}),
     projection: candidate.projection,
     required: candidate.required,
   });
@@ -117,7 +119,7 @@ function isInternalHostname(hostname: string): boolean {
   return false;
 }
 
-function validateCandidateUrl(raw: string, label: string) {
+export function validateSupplyCandidateUrl(raw: string, label: string) {
   const url = new URL(raw);
   const testLoopback = process.env.NODE_ENV === "test" && (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "::1" || url.hostname === "[::1]");
   if (!testLoopback && url.protocol !== "https:") throw new Error(`${label} must use HTTPS`);
@@ -135,11 +137,11 @@ function validateCandidate(candidate: SupplyCandidate) {
   for (const field of candidate.required) {
     if (!candidate.projection[field]) throw new Error(`Required output is not projected: ${field}`);
   }
-  validateCandidateUrl(candidate.base_url, "base_url");
-  validateCandidateUrl(candidate.evidence_url, "evidence_url");
+  validateSupplyCandidateUrl(candidate.base_url, "base_url");
+  validateSupplyCandidateUrl(candidate.evidence_url, "evidence_url");
 }
 
-function toVerificationRecipe(candidate: SupplyCandidate, verifiedAt: string): VerifiedRecipe {
+export function recipeFromSupplyCandidate(candidate: SupplyCandidate, verifiedAt: string, safePost?: SafePostReplayEvidence): VerifiedRecipe {
   return {
     capability: candidate.capability,
     family: candidate.family,
@@ -152,6 +154,7 @@ function toVerificationRecipe(candidate: SupplyCandidate, verifiedAt: string): V
     path_bindings: { ...candidate.path_bindings },
     query_bindings: { ...candidate.query_bindings },
     ...(candidate.body_bindings ? { body_bindings: { ...candidate.body_bindings } } : {}),
+    ...(candidate.generated_headers?.length ? { generated_headers: structuredClone(candidate.generated_headers) } : {}),
     projection: structuredClone(candidate.projection),
     required: [...candidate.required],
     example_input: structuredClone(candidate.verification_inputs[0]),
@@ -161,6 +164,7 @@ function toVerificationRecipe(candidate: SupplyCandidate, verifiedAt: string): V
       verification_inputs: structuredClone(candidate.verification_inputs),
       verified_at: verifiedAt,
       evidence_url: candidate.evidence_url,
+      ...(safePost ? { safe_post: structuredClone(safePost) } : {}),
     },
   };
 }
@@ -194,7 +198,7 @@ export function rankSupplyOpportunities(limit = 10): SupplyOpportunity[] {
 export async function verifySupplyCandidate(candidate: SupplyCandidate, options: { timeoutMs?: number } = {}): Promise<SupplyVerification> {
   validateCandidate(candidate);
   const verifiedAt = new Date().toISOString();
-  const recipe = toVerificationRecipe(candidate, verifiedAt);
+  const recipe = recipeFromSupplyCandidate(candidate, verifiedAt);
   const runs: SupplyVerificationRun[] = [];
 
   for (const input of candidate.verification_inputs) {
