@@ -37,6 +37,7 @@ jobs:
         env:
           MISSING_DISTRIBUTED_MONEY_ENABLED: "1"
           MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED: "0"
+          MISSING_DISTRIBUTED_LEGACY_UNFENCED_MUTATIONS: "1"
           MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_kappa57?sslmode=disable
           MISSING_POSTGRES_SSLMODE: disable
           MISSING_POSTGRES_POOL_MAX: "4"

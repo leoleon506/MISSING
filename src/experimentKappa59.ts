@@ -17,7 +17,7 @@ import { stableSettlementIntentId } from "./runtime/recoveryPolicy.js";
 process.env.MISSING_AGENT_PAYMENTS_ENABLED = "1";
 process.env.MISSING_DISTRIBUTED_MONEY_ENABLED = "1";
 process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED = "0";
-process.env.MISSING_X402_RECOVERY_LEASE_MS = "100";
+process.env.MISSING_X402_RECOVERY_LEASE_MS = "250";
 process.env.MISSING_X402_ENABLED = "1";
 process.env.MISSING_X402_NETWORK = "eip155:84532";
 process.env.MISSING_X402_ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
@@ -173,68 +173,42 @@ const evidence: any = {
   scenarios: [],
 };
 
-// 1. A crash after reservation is recoverable because no provider effect has started.
+const recoveryWaitMs = 320;
+
 {
   const capability = "kappa59_reservation_restart";
   const signature = paymentSignature(capability);
   const hash = paymentHash(signature);
   await worker(args(capability, signature, "idempotent", "after_reservation"), 91);
-  await sleep(140);
+  await sleep(recoveryWaitMs);
   const response = parsed((await worker(args(capability, signature, "idempotent"))).stdout);
   const row = await distributedPayment(hash);
-  evidence.scenarios.push({
-    name: "production_crash_after_reservation",
-    response_status: response.status,
-    provider_calls: providerCalls.get(capability) ?? 0,
-    provider_effects: providerEffects.get(capability) ?? 0,
-    final_state: row?.state ?? null,
-    pass: response.status === 200 && (providerCalls.get(capability) ?? 0) === 1 && (providerEffects.get(capability) ?? 0) === 1 && row?.state === "settled",
-  });
+  evidence.scenarios.push({ name: "production_crash_after_reservation", response_status: response.status, provider_calls: providerCalls.get(capability) ?? 0, provider_effects: providerEffects.get(capability) ?? 0, final_state: row?.state ?? null, pass: response.status === 200 && (providerCalls.get(capability) ?? 0) === 1 && (providerEffects.get(capability) ?? 0) === 1 && row?.state === "settled" });
 }
 
-// 2. A POST that crashed after its external effect replays the exact recipe with the same provider idempotency key.
 {
   const capability = "kappa59_idempotent_provider_restart";
   const signature = paymentSignature(capability);
   const hash = paymentHash(signature);
   await worker(args(capability, signature, "idempotent", "after_provider_effect"), 92);
-  await sleep(140);
+  await sleep(recoveryWaitMs);
   const response = parsed((await worker(args(capability, signature, "idempotent"))).stdout);
   const row = await distributedPayment(hash);
   const keys = providerKeys.get(capability) ?? [];
-  evidence.scenarios.push({
-    name: "production_idempotent_provider_replay",
-    response_status: response.status,
-    provider_calls: providerCalls.get(capability) ?? 0,
-    provider_effects: providerEffects.get(capability) ?? 0,
-    same_idempotency_key: keys.length === 2 && Boolean(keys[0]) && keys[0] === keys[1],
-    durable_key_matches: row?.provider_idempotency_key === keys[0],
-    final_state: row?.state ?? null,
-    pass: response.status === 200 && (providerCalls.get(capability) ?? 0) === 2 && (providerEffects.get(capability) ?? 0) === 1 && keys.length === 2 && keys[0] === keys[1] && row?.provider_idempotency_key === keys[0] && row.state === "settled",
-  });
+  evidence.scenarios.push({ name: "production_idempotent_provider_replay", response_status: response.status, provider_calls: providerCalls.get(capability) ?? 0, provider_effects: providerEffects.get(capability) ?? 0, same_idempotency_key: keys.length === 2 && Boolean(keys[0]) && keys[0] === keys[1], durable_key_matches: row?.provider_idempotency_key === keys[0], final_state: row?.state ?? null, pass: response.status === 200 && (providerCalls.get(capability) ?? 0) === 2 && (providerEffects.get(capability) ?? 0) === 1 && keys.length === 2 && keys[0] === keys[1] && row?.provider_idempotency_key === keys[0] && row.state === "settled" });
 }
 
-// 3. A POST without a verified recovery contract is quarantined instead of retried.
 {
   const capability = "kappa59_ambiguous_provider_restart";
   const signature = paymentSignature(capability);
   const hash = paymentHash(signature);
   await worker(args(capability, signature, "ambiguous", "after_provider_effect"), 92);
-  await sleep(140);
+  await sleep(recoveryWaitMs);
   const response = parsed((await worker(args(capability, signature, "ambiguous"))).stdout);
   const row = await distributedPayment(hash);
-  evidence.scenarios.push({
-    name: "production_ambiguous_provider_quarantine",
-    response_status: response.status,
-    response_error: response.body?.error ?? null,
-    provider_calls: providerCalls.get(capability) ?? 0,
-    provider_effects: providerEffects.get(capability) ?? 0,
-    final_state: row?.state ?? null,
-    pass: response.status === 409 && response.body?.error === "payment_outcome_ambiguous" && (providerCalls.get(capability) ?? 0) === 1 && (providerEffects.get(capability) ?? 0) === 1 && row?.state === "ambiguous",
-  });
+  evidence.scenarios.push({ name: "production_ambiguous_provider_quarantine", response_status: response.status, response_error: response.body?.error ?? null, provider_calls: providerCalls.get(capability) ?? 0, provider_effects: providerEffects.get(capability) ?? 0, final_state: row?.state ?? null, pass: response.status === 409 && response.body?.error === "payment_outcome_ambiguous" && (providerCalls.get(capability) ?? 0) === 1 && (providerEffects.get(capability) ?? 0) === 1 && row?.state === "ambiguous" });
 }
 
-// 4. A crash after facilitator settlement but before transaction persistence resubmits the same durable settlement intent.
 {
   const capability = "kappa59_settlement_restart";
   const signature = paymentSignature(capability);
@@ -242,21 +216,10 @@ const evidence: any = {
   const requestHash = agentRequestHash(capability, { scenario: capability });
   const intent = stableSettlementIntentId(hash, requestHash);
   await worker(args(capability, signature, "idempotent", "after_settlement_effect"), 93);
-  await sleep(140);
+  await sleep(recoveryWaitMs);
   const response = parsed((await worker(args(capability, signature, "idempotent"))).stdout);
   const row = await distributedPayment(hash);
-  evidence.scenarios.push({
-    name: "production_settlement_intent_replay",
-    response_status: response.status,
-    provider_calls: providerCalls.get(capability) ?? 0,
-    provider_effects: providerEffects.get(capability) ?? 0,
-    facilitator_calls: settlementCalls.get(intent) ?? 0,
-    settlement_effects: settlementEffects.get(intent) ?? 0,
-    durable_intent_matches: row?.settlement_intent_id === intent,
-    transaction_matches: row?.transaction_reference === settlementTransactions.get(intent),
-    final_state: row?.state ?? null,
-    pass: response.status === 200 && (providerCalls.get(capability) ?? 0) === 1 && (providerEffects.get(capability) ?? 0) === 1 && (settlementCalls.get(intent) ?? 0) === 2 && (settlementEffects.get(intent) ?? 0) === 1 && row?.settlement_intent_id === intent && row.transaction_reference === settlementTransactions.get(intent) && row.state === "settled",
-  });
+  evidence.scenarios.push({ name: "production_settlement_intent_replay", response_status: response.status, provider_calls: providerCalls.get(capability) ?? 0, provider_effects: providerEffects.get(capability) ?? 0, facilitator_calls: settlementCalls.get(intent) ?? 0, settlement_effects: settlementEffects.get(intent) ?? 0, durable_intent_matches: row?.settlement_intent_id === intent, transaction_matches: row?.transaction_reference === settlementTransactions.get(intent), final_state: row?.state ?? null, pass: response.status === 200 && (providerCalls.get(capability) ?? 0) === 1 && (providerEffects.get(capability) ?? 0) === 1 && (settlementCalls.get(intent) ?? 0) === 2 && (settlementEffects.get(intent) ?? 0) === 1 && row?.settlement_intent_id === intent && row.transaction_reference === settlementTransactions.get(intent) && row.state === "settled" });
 }
 
 const passed = evidence.scenarios.every((scenario: any) => scenario.pass === true);
