@@ -208,11 +208,12 @@ async function facilitatorPost(path: "verify" | "settle", body: unknown, extraHe
   if (!facilitatorUrl) throw new Error("x402 facilitator is not configured");
   const headers: Record<string, string> = { "Content-Type": "application/json", ...extraHeaders };
   if (c.facilitatorBearer) headers.Authorization = `Bearer ${c.facilitatorBearer}`;
-  return runDependencyOperation(path === "verify" ? "facilitator_verify" : "facilitator_settle", async () => {
+  return runDependencyOperation(path === "verify" ? "facilitator_verify" : "facilitator_settle", async signal => {
     const response = await facilitatorFetch(`${facilitatorUrl.replace(/\/$/, "")}/${path}`, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
+      signal,
     });
     if (!response.ok) throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
     return response.json();
