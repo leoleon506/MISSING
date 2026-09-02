@@ -1,5 +1,6 @@
 export type X402TransactionState = "confirmed" | "failed" | "pending" | "unavailable";
 export type X402SettlementProofState = "verified" | "failed" | "pending" | "unavailable";
+export type X402FinalityPolicySource = "per_chain_env" | "legacy_global_env" | "builtin";
 
 export interface X402SettlementProof {
   state: X402SettlementProofState;
@@ -10,9 +11,20 @@ export interface X402SettlementProof {
   block_hash?: string;
   confirmations?: number;
   required_confirmations?: number;
+  finality_policy_source?: X402FinalityPolicySource;
 }
 
+export type X402FinalityPolicyResolution =
+  | { ok: true; network: string; required_confirmations: number; source: X402FinalityPolicySource }
+  | { ok: false; network: string; reason: "unsupported_network" | "invalid_finality_policy_config" | "finality_policy_missing_for_network" | "invalid_legacy_confirmation_config" };
+
 let rpcFetch: typeof fetch = (...args) => globalThis.fetch(...args);
+
+const BUILTIN_FINALITY_POLICIES: Readonly<Record<string, number>> = Object.freeze({
+  // Historical/test network used by the Kappa x402 proofs. This explicit
+  // chain-scoped compatibility policy replaces the former implicit global 1.
+  "eip155:84532": 1,
+});
 
 export function configureX402RpcFetch(fn?: typeof fetch) {
   rpcFetch = fn ?? ((...args) => globalThis.fetch(...args));
@@ -24,11 +36,73 @@ export function x402RpcUrl(): string | null {
   return null;
 }
 
-export function x402MinConfirmations(): number {
-  const raw = process.env.MISSING_X402_MIN_CONFIRMATIONS?.trim();
-  if (!raw) return 1;
-  const parsed = Number(raw);
-  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : 1;
+function strictPositiveInteger(value: unknown): number | null {
+  if (typeof value === "number") return Number.isSafeInteger(value) && value >= 1 ? value : null;
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value.trim())) return null;
+  const parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : null;
+}
+
+/**
+ * Legacy compatibility parser. Unlike Kappa.5.5, invalid or missing values never
+ * collapse to 1. Production settlement uses x402FinalityPolicy(network).
+ */
+export function x402MinConfirmations(): number | null {
+  if (process.env.MISSING_X402_MIN_CONFIRMATIONS === undefined) return null;
+  return strictPositiveInteger(process.env.MISSING_X402_MIN_CONFIRMATIONS);
+}
+
+function parsePerChainPolicies(raw: string): Record<string, number> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const result: Record<string, number> = {};
+  for (const [network, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!/^eip155:\d+$/.test(network)) return null;
+    const confirmations = strictPositiveInteger(value);
+    if (confirmations === null) return null;
+    result[network] = confirmations;
+  }
+  return result;
+}
+
+/**
+ * Resolve an exact finality policy for one CAIP-2 EVM network.
+ *
+ * Precedence is deliberately fail-closed:
+ * 1. If MISSING_X402_FINALITY_POLICIES is present, the whole JSON map must be
+ *    valid and must contain the requested network. A typo never falls through.
+ * 2. The old global MISSING_X402_MIN_CONFIRMATIONS remains accepted only when it
+ *    is explicitly present and strictly valid. Invalid values never become 1.
+ * 3. A tiny built-in map preserves the historical Base Sepolia proof behavior.
+ *    Any other network without operator policy is unavailable, not guessed.
+ */
+export function x402FinalityPolicy(network: string): X402FinalityPolicyResolution {
+  const normalized = network.trim();
+  if (!/^eip155:\d+$/.test(normalized)) return { ok: false, network: normalized, reason: "unsupported_network" };
+
+  if (process.env.MISSING_X402_FINALITY_POLICIES !== undefined) {
+    const raw = process.env.MISSING_X402_FINALITY_POLICIES.trim();
+    const policies = raw ? parsePerChainPolicies(raw) : null;
+    if (!policies) return { ok: false, network: normalized, reason: "invalid_finality_policy_config" };
+    const confirmations = policies[normalized];
+    if (confirmations === undefined) return { ok: false, network: normalized, reason: "finality_policy_missing_for_network" };
+    return { ok: true, network: normalized, required_confirmations: confirmations, source: "per_chain_env" };
+  }
+
+  if (process.env.MISSING_X402_MIN_CONFIRMATIONS !== undefined) {
+    const confirmations = x402MinConfirmations();
+    if (confirmations === null) return { ok: false, network: normalized, reason: "invalid_legacy_confirmation_config" };
+    return { ok: true, network: normalized, required_confirmations: confirmations, source: "legacy_global_env" };
+  }
+
+  const builtin = BUILTIN_FINALITY_POLICIES[normalized];
+  if (builtin !== undefined) return { ok: true, network: normalized, required_confirmations: builtin, source: "builtin" };
+  return { ok: false, network: normalized, reason: "finality_policy_missing_for_network" };
 }
 
 async function rpc(method: string, params: unknown[]): Promise<{ ok: true; result: any } | { ok: false; reason: string }> {
@@ -95,65 +169,70 @@ export async function x402SettlementProof(args: {
   const expectedChain = expectedChainId(args.network);
   const asset = normalizeAddress(args.asset);
   const payTo = normalizeAddress(args.payTo);
-  const requiredConfirmations = x402MinConfirmations();
   let amount: bigint;
-  try { amount = BigInt(args.amount); } catch { return { state: "failed", reason: "invalid_expected_amount", required_confirmations: requiredConfirmations }; }
-  if (expectedChain === null) return { state: "failed", reason: "unsupported_network", required_confirmations: requiredConfirmations };
-  if (!asset) return { state: "failed", reason: "invalid_expected_asset", required_confirmations: requiredConfirmations };
-  if (!payTo) return { state: "failed", reason: "invalid_expected_recipient", required_confirmations: requiredConfirmations };
-  if (amount < 0n) return { state: "failed", reason: "invalid_expected_amount", required_confirmations: requiredConfirmations };
+  try { amount = BigInt(args.amount); } catch { return { state: "failed", reason: "invalid_expected_amount" }; }
+  if (expectedChain === null) return { state: "failed", reason: "unsupported_network" };
+  if (!asset) return { state: "failed", reason: "invalid_expected_asset" };
+  if (!payTo) return { state: "failed", reason: "invalid_expected_recipient" };
+  if (amount < 0n) return { state: "failed", reason: "invalid_expected_amount" };
+
+  const policy = x402FinalityPolicy(args.network);
+  if (!policy.ok) return { state: "unavailable", reason: policy.reason };
+  const requiredConfirmations = policy.required_confirmations;
+  const policySource = policy.source;
+  const policyEvidence = { required_confirmations: requiredConfirmations, finality_policy_source: policySource };
 
   const chain = await rpc("eth_chainId", []);
-  if (!chain.ok) return { state: "unavailable", reason: chain.reason, required_confirmations: requiredConfirmations };
+  if (!chain.ok) return { state: "unavailable", reason: chain.reason, ...policyEvidence };
   const actualChain = hexBigInt(chain.result);
-  if (actualChain === null) return { state: "unavailable", reason: "invalid_chain_id_response", required_confirmations: requiredConfirmations };
-  if (actualChain !== expectedChain) return { state: "failed", reason: "network_mismatch", chain_id: String(actualChain), required_confirmations: requiredConfirmations };
+  if (actualChain === null) return { state: "unavailable", reason: "invalid_chain_id_response", ...policyEvidence };
+  if (actualChain !== expectedChain) return { state: "failed", reason: "network_mismatch", chain_id: String(actualChain), ...policyEvidence };
 
   const receiptResult = await rpc("eth_getTransactionReceipt", [args.transaction]);
-  if (!receiptResult.ok) return { state: "unavailable", reason: receiptResult.reason, chain_id: String(actualChain), required_confirmations: requiredConfirmations };
+  if (!receiptResult.ok) return { state: "unavailable", reason: receiptResult.reason, chain_id: String(actualChain), ...policyEvidence };
   const receipt = receiptResult.result;
-  if (!receipt) return { state: "pending", chain_id: String(actualChain), required_confirmations: requiredConfirmations };
+  if (!receipt) return { state: "pending", chain_id: String(actualChain), ...policyEvidence };
   const status = receipt.status;
-  if (status === "0x0" || status === 0 || status === "0") return { state: "failed", reason: "transaction_reverted", chain_id: String(actualChain), required_confirmations: requiredConfirmations };
-  if (!(status === "0x1" || status === 1 || status === "1")) return { state: "pending", reason: "transaction_status_unknown", chain_id: String(actualChain), required_confirmations: requiredConfirmations };
+  if (status === "0x0" || status === 0 || status === "0") return { state: "failed", reason: "transaction_reverted", chain_id: String(actualChain), ...policyEvidence };
+  if (!(status === "0x1" || status === 1 || status === "1")) return { state: "pending", reason: "transaction_status_unknown", chain_id: String(actualChain), ...policyEvidence };
 
   const receiptBlockNumber = hexBigInt(receipt.blockNumber);
   const receiptBlockHash = normalizeHash(receipt.blockHash);
   if (receiptBlockNumber === null || !receiptBlockHash) {
-    return { state: "unavailable", reason: "receipt_block_anchor_missing", chain_id: String(actualChain), required_confirmations: requiredConfirmations };
+    return { state: "unavailable", reason: "receipt_block_anchor_missing", chain_id: String(actualChain), ...policyEvidence };
   }
   const blockNumberHex = `0x${receiptBlockNumber.toString(16)}`;
 
   const latestResult = await rpc("eth_blockNumber", []);
-  if (!latestResult.ok) return { state: "unavailable", reason: latestResult.reason, chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, required_confirmations: requiredConfirmations };
+  if (!latestResult.ok) return { state: "unavailable", reason: latestResult.reason, chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, ...policyEvidence };
   const latestBlock = hexBigInt(latestResult.result);
-  if (latestBlock === null) return { state: "unavailable", reason: "invalid_latest_block_response", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, required_confirmations: requiredConfirmations };
+  if (latestBlock === null) return { state: "unavailable", reason: "invalid_latest_block_response", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, ...policyEvidence };
   const confirmations = safeConfirmations(latestBlock, receiptBlockNumber);
-  if (confirmations === null) return { state: "pending", reason: "receipt_block_ahead_of_head", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations: 0, required_confirmations: requiredConfirmations };
+  if (confirmations === null) return { state: "pending", reason: "receipt_block_ahead_of_head", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations: 0, ...policyEvidence };
   if (confirmations < requiredConfirmations) {
-    return { state: "pending", reason: "insufficient_confirmations", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, required_confirmations: requiredConfirmations };
+    return { state: "pending", reason: "insufficient_confirmations", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, ...policyEvidence };
   }
 
   const canonicalBlockResult = await rpc("eth_getBlockByNumber", [blockNumberHex, false]);
-  if (!canonicalBlockResult.ok) return { state: "unavailable", reason: canonicalBlockResult.reason, chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, required_confirmations: requiredConfirmations };
+  if (!canonicalBlockResult.ok) return { state: "unavailable", reason: canonicalBlockResult.reason, chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, ...policyEvidence };
   const canonicalBlockHash = normalizeHash(canonicalBlockResult.result?.hash);
-  if (!canonicalBlockHash) return { state: "unavailable", reason: "canonical_block_unavailable", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, required_confirmations: requiredConfirmations };
+  if (!canonicalBlockHash) return { state: "unavailable", reason: "canonical_block_unavailable", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, ...policyEvidence };
   if (canonicalBlockHash !== receiptBlockHash) {
-    return { state: "failed", reason: "reorg_block_hash_mismatch", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, required_confirmations: requiredConfirmations };
+    return { state: "failed", reason: "reorg_block_hash_mismatch", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, ...policyEvidence };
   }
 
   const stableReceiptResult = await rpc("eth_getTransactionReceipt", [args.transaction]);
-  if (!stableReceiptResult.ok) return { state: "unavailable", reason: stableReceiptResult.reason, chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, required_confirmations: requiredConfirmations };
+  if (!stableReceiptResult.ok) return { state: "unavailable", reason: stableReceiptResult.reason, chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, ...policyEvidence };
   const stableReceipt = stableReceiptResult.result;
-  if (!stableReceipt) return { state: "failed", reason: "reorg_receipt_disappeared", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, required_confirmations: requiredConfirmations };
+  if (!stableReceipt) return { state: "failed", reason: "reorg_receipt_disappeared", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, ...policyEvidence };
   const stableBlockNumber = hexBigInt(stableReceipt.blockNumber);
   const stableBlockHash = normalizeHash(stableReceipt.blockHash);
   if (stableBlockNumber !== receiptBlockNumber || stableBlockHash !== receiptBlockHash) {
-    return { state: "failed", reason: "reorg_receipt_moved", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, required_confirmations: requiredConfirmations };
+    return { state: "failed", reason: "reorg_receipt_moved", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, ...policyEvidence };
   }
   const stableStatus = stableReceipt.status;
   if (!(stableStatus === "0x1" || stableStatus === 1 || stableStatus === "1")) {
-    return { state: "failed", reason: "reorg_receipt_status_changed", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, required_confirmations: requiredConfirmations };
+    return { state: "failed", reason: "reorg_receipt_status_changed", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, ...policyEvidence };
   }
 
   const logs = Array.isArray(stableReceipt.logs) ? stableReceipt.logs : [];
@@ -180,12 +259,12 @@ export async function x402SettlementProof(args: {
         block_number: blockNumberHex,
         block_hash: receiptBlockHash,
         confirmations,
-        required_confirmations: requiredConfirmations,
+        ...policyEvidence,
       };
     }
   }
 
-  const evidence = { chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, required_confirmations: requiredConfirmations };
+  const evidence = { chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, ...policyEvidence };
   if (!sawTransfer) return { state: "failed", reason: "erc20_transfer_missing", ...evidence };
   if (!sawAsset) return { state: "failed", reason: "asset_mismatch", ...evidence };
   if (!sawRecipient) return { state: "failed", reason: "recipient_mismatch", ...evidence };
