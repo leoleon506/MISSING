@@ -1,0 +1,47 @@
+name: Kappa.5.15 Post-Settlement Deep Reorg Monitoring
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [product-kappa515-deep-reorg-settled-monitoring]
+
+jobs:
+  post-settlement-deep-reorg-monitoring:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: missing
+          POSTGRES_PASSWORD: missing
+          POSTGRES_DB: missing_kappa515
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U missing -d missing_kappa515"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Run Kappa.5.15 post-settlement deep reorg monitoring proof
+        env:
+          MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_kappa515?sslmode=disable
+          MISSING_POSTGRES_SSLMODE: disable
+        run: npx tsx src/experimentKappa515.ts
+      - name: Verify Kappa.5.15 evidence exists
+        run: test -s artifacts/product-kappa515-deep-reorg-monitoring.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: product-kappa515-deep-reorg-monitoring
+          path: artifacts/product-kappa515-deep-reorg-monitoring.json
+          if-no-files-found: warn
