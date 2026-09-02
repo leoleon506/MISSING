@@ -204,11 +204,12 @@ function paymentHash(header: string): string {
 
 async function facilitatorPost(path: "verify" | "settle", body: unknown, extraHeaders: Record<string, string> = {}): Promise<any> {
   const c = x402Config();
-  if (!c.facilitatorUrl) throw new Error("x402 facilitator is not configured");
+  const facilitatorUrl = c.facilitatorUrl;
+  if (!facilitatorUrl) throw new Error("x402 facilitator is not configured");
   const headers: Record<string, string> = { "Content-Type": "application/json", ...extraHeaders };
   if (c.facilitatorBearer) headers.Authorization = `Bearer ${c.facilitatorBearer}`;
   return runDependencyOperation(path === "verify" ? "facilitator_verify" : "facilitator_settle", async () => {
-    const response = await facilitatorFetch(`${c.facilitatorUrl.replace(/\/$/, "")}/${path}`, {
+    const response = await facilitatorFetch(`${facilitatorUrl.replace(/\/$/, "")}/${path}`, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
