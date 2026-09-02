@@ -1,0 +1,23 @@
+name: Kappa.5.4 Exact On-Chain Settlement Proof
+on:
+  push:
+    branches: [product-kappa54-onchain-settlement-proof]
+  pull_request:
+    branches: [main]
+
+jobs:
+  exact-onchain-settlement-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Kappa.5.4 proof tests
+        run: npx vitest run tests/productKappa54OnchainSettlementProof.test.ts
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
