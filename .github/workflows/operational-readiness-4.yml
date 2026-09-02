@@ -1,0 +1,54 @@
+name: Operational Readiness 4 Failure Injection Recovery Envelope
+on:
+  push:
+    branches: [operational-readiness-4-failure-injection-recovery]
+  pull_request:
+    branches: [main]
+
+jobs:
+  failure-injection-recovery:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: missing
+          POSTGRES_PASSWORD: missing
+          POSTGRES_DB: missing_or4
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U missing -d missing_or4"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Operational failure injection and recovery drill
+        env:
+          MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_or4?sslmode=disable
+          MISSING_POSTGRES_SSLMODE: disable
+          MISSING_DISTRIBUTED_MONEY_ENABLED: "1"
+          MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED: "0"
+          MISSING_X402_RECOVERY_LEASE_MS: "1200"
+          MISSING_POSTGRES_POOL_MAX: "4"
+          MISSING_POSTGRES_TIMEOUT_MS: "10000"
+        run: npx tsx src/operationalReadiness4.ts
+      - name: Verify evidence exists
+        run: test -s artifacts/operational-readiness-4-failure-injection-recovery.json
+      - name: Upload OR4 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-readiness-4-failure-injection-recovery
+          path: artifacts/operational-readiness-4-failure-injection-recovery.json
+          if-no-files-found: warn
