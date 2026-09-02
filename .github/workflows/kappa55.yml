@@ -1,0 +1,25 @@
+name: Kappa.5.5 Settlement Finality Reorg Resistance
+on:
+  push:
+    branches: [product-kappa55-settlement-finality-reorg-resistance]
+  pull_request:
+    branches: [main]
+
+jobs:
+  settlement-finality-reorg-resistance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Kappa.5.5 proof tests
+        run: npx vitest run tests/productKappa55SettlementFinality.test.ts
+      - name: Kappa.5.4 regression tests
+        run: npx vitest run tests/productKappa54OnchainSettlementProof.test.ts
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
