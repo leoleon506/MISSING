@@ -1,0 +1,54 @@
+name: Operational Readiness 1 Load Concurrency Baseline
+on:
+  push:
+    branches: [operational-readiness-1-load-concurrency-baseline]
+  pull_request:
+    branches: [main]
+
+jobs:
+  load-concurrency-baseline:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: missing
+          POSTGRES_PASSWORD: missing
+          POSTGRES_DB: missing_or1
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U missing -d missing_or1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_or1?sslmode=disable
+      MISSING_POSTGRES_SSLMODE: disable
+      MISSING_DISTRIBUTED_MONEY_ENABLED: "1"
+      MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED: "0"
+      MISSING_POSTGRES_POOL_MAX: "8"
+      MISSING_POSTGRES_TIMEOUT_MS: "15000"
+      MISSING_OR1_WORKERS: "8"
+      MISSING_OR1_KEYS: "200"
+      MISSING_OR1_CONTENDERS_PER_KEY: "4"
+      MISSING_OR1_HOT_CONTENDERS: "200"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Operational load and concurrency proof
+        run: npx tsx src/operationalReadiness1.ts
+      - name: Verify evidence exists
+        run: test -s artifacts/operational-readiness-1-load-concurrency-baseline.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: operational-readiness-1-load-concurrency-baseline
+          path: artifacts/operational-readiness-1-load-concurrency-baseline.json
