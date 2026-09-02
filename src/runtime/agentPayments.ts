@@ -567,7 +567,7 @@ export async function handleAgentPaidResolution(args: {
   if (!agentPaymentsEnabled()) return { status: 404, body: { error: "not_found" } };
   if (!x402Ready()) return { status: 503, body: { error: "agent_payment_rail_not_ready", rail: "x402" } };
   if (!args.request?.capability || typeof args.request.capability !== "string" || !args.request.input || typeof args.request.input !== "object" || Array.isArray(args.request.input)) {
-    return { status: 400, body: { error: "invalid_request", required: { capability: "string", input: "object" } };
+    return { status: 400, body: { error: "invalid_request", required: { capability: "string", input: "object" } } };
   }
 
   let requestHash: string;
