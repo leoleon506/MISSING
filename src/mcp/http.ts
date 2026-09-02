@@ -14,6 +14,7 @@ import { openApiCompilerEnabled } from "../runtime/openApiCompiler.js";
 import { runThetaOrchestrator, thetaOrchestratorEnabled } from "../runtime/orchestrator.js";
 import { providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
+import { safePostReplayEnabled } from "../runtime/safePostReplay.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
 import { supplyLedgerPath } from "../runtime/supplyLedger.js";
 import { createProductServer } from "./server.js";
@@ -46,6 +47,7 @@ export function healthPayload() {
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
     theta_orchestrator_enabled: thetaOrchestratorEnabled(),
+    safe_post_replay_enabled: safePostReplayEnabled(),
     control_plane_enabled: controlPlaneEnabled(),
     sandbox: sandboxConfig().enabled,
   };
@@ -79,6 +81,7 @@ export function readinessPayload(baseUrl: string) {
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
     theta_orchestrator_enabled: thetaOrchestratorEnabled(),
+    safe_post_replay_enabled: safePostReplayEnabled(),
     control_plane_enabled: controlPlaneEnabled(),
   };
 }
