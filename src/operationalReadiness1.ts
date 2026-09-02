@@ -68,9 +68,9 @@ function launchWorker(workerId: number): ChildState {
       stdoutBuffer = stdoutBuffer.slice(newline + 1);
       if (!line) continue;
       try {
-        const parsed = JSON.parse(line) as { type?: string } & Partial<WorkerResult>;
+        const parsed = JSON.parse(line) as { type?: unknown };
         if (parsed.type === "ready") readyResolve();
-        if (parsed.type === "result") resultResolve(parsed as WorkerResult);
+        else if (parsed.type === "result") resultResolve(parsed as unknown as WorkerResult);
       } catch {
         // Ignore incidental stdout that is not structured worker evidence.
       }
