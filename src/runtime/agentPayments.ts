@@ -26,6 +26,7 @@ import {
   stableProviderIdempotencyKey,
   stableSettlementIntentId,
 } from "./recoveryPolicy.js";
+import { releaseRecoverableDistributedLease } from "./recoverableLease.js";
 import {
   cachedTransactionalResponse,
   failTransactionalPayment,
@@ -92,6 +93,19 @@ export interface AgentPaymentHttpResult {
   status: number;
   headers?: Record<string, string>;
   body: unknown;
+}
+
+async function relinquishRecoverableLease(record: DistributedPaymentRecord, leaseToken: string) {
+  try {
+    return await releaseRecoverableDistributedLease({
+      paymentHash: record.payment_hash,
+      executionId: record.execution_id,
+      leaseToken,
+      leaseFence: record.lease_fence,
+    });
+  } catch {
+    return { released: false, state: record.state, leaseFence: record.lease_fence };
+  }
 }
 
 function bindingFailure(record: Pick<TransactionalPaymentRecord, "request_hash" | "state" | "transaction_reference">, currentRequestHash: string): AgentPaymentHttpResult | null {
@@ -181,6 +195,7 @@ async function reconcileKnownDistributedSettlement(
   const asset = process.env.MISSING_X402_ASSET?.trim();
   const payTo = process.env.MISSING_X402_PAY_TO?.trim();
   if (!prior.network || prior.customer_price_microusd === null || !asset || !payTo || !prior.transaction_reference) {
+    await relinquishRecoverableLease(prior, leaseToken);
     return { status: 503, body: { error: "payment_reconciliation_data_incomplete", prior_state: "settling" } };
   }
 
@@ -197,7 +212,10 @@ async function reconcileKnownDistributedSettlement(
   });
   if (chain.state === "verified") {
     const reconstructed = distributedResponse(prior);
-    if (!reconstructed) return { status: 503, body: { error: "payment_reconciliation_data_incomplete", prior_state: "settling" } };
+    if (!reconstructed) {
+      await relinquishRecoverableLease(prior, leaseToken);
+      return { status: 503, body: { error: "payment_reconciliation_data_incomplete", prior_state: "settling" } };
+    }
     const committed = await settleDistributedPayment({
       paymentHash: prior.payment_hash,
       executionId: prior.execution_id,
@@ -216,6 +234,7 @@ async function reconcileKnownDistributedSettlement(
         if (recovered) return recovered;
         if (latest.state === "settled") return { status: 200, headers: reconstructed.headers, body: reconstructed.body };
       }
+      await relinquishRecoverableLease(prior, leaseToken);
       return { status: 503, body: { error: "payment_commit_reconciliation_required", payment_settled: true, transaction: prior.transaction_reference } };
     }
     const recipeFingerprint = reconstructed.resolution.status === "resolved" ? reconstructed.resolution.recipe_fingerprint : null;
@@ -243,6 +262,7 @@ async function reconcileKnownDistributedSettlement(
     });
     return { status: 409, body: { error: "payment_settlement_proof_failed", reason: chain.reason, prior_state: "failed", payment_settled: false, transaction: prior.transaction_reference } };
   }
+  await relinquishRecoverableLease(prior, leaseToken);
   return {
     status: 503,
     body: {
@@ -379,13 +399,15 @@ async function finishDistributedSettlement(args: {
       settlementIntentId: args.record.settlement_intent_id,
     });
   } catch (error) {
+    await relinquishRecoverableLease(args.record, args.leaseToken);
     return { status: 503, body: { error: "payment_settlement_reconciliation_required", payment_settled: false, reason: error instanceof Error ? error.message : String(error) } };
   }
 
   await crashPoint("after_settlement_effect", args.record.payment_hash, args.record.execution_id);
 
   if (!settlement.success && settlement.errorReason === "settlement_pending" && settlement.transaction) {
-    await markDistributedSettlementPending({ paymentHash: args.record.payment_hash, executionId: args.record.execution_id, transactionReference: settlement.transaction, reason: "settlement_pending", leaseToken: args.leaseToken });
+    const pending = await markDistributedSettlementPending({ paymentHash: args.record.payment_hash, executionId: args.record.execution_id, transactionReference: settlement.transaction, reason: "settlement_pending", leaseToken: args.leaseToken });
+    await relinquishRecoverableLease(pending.record ?? args.record, args.leaseToken);
     return { status: 503, body: { error: "payment_settlement_reconciliation_required", payment_settled: false, transaction: settlement.transaction, prior_state: "settling" } };
   }
 
@@ -401,7 +423,11 @@ async function finishDistributedSettlement(args: {
     reason: "settlement_transaction_observed",
     leaseToken: args.leaseToken,
   });
-  if (!observed.changed) return { status: 503, body: { error: "payment_settlement_reconciliation_required", payment_settled: false, transaction: settlement.transaction } };
+  if (!observed.changed) {
+    await relinquishRecoverableLease(args.record, args.leaseToken);
+    return { status: 503, body: { error: "payment_settlement_reconciliation_required", payment_settled: false, transaction: settlement.transaction } };
+  }
+  args.record = observed.record ?? args.record;
 
   await crashPoint("after_settlement_transaction_persisted", args.record.payment_hash, args.record.execution_id);
 
@@ -417,7 +443,8 @@ async function finishDistributedSettlement(args: {
     return { status: 409, body: { error: "payment_settlement_proof_failed", payment_settled: false, transaction: settlement.transaction, reason: chain.reason } };
   }
   if (chain.state !== "verified") {
-    await markDistributedSettlementPending({ paymentHash: args.record.payment_hash, executionId: args.record.execution_id, transactionReference: settlement.transaction, reason: `settlement_proof_${chain.state}${chain.reason ? `:${chain.reason}` : ""}`, leaseToken: args.leaseToken });
+    const pending = await markDistributedSettlementPending({ paymentHash: args.record.payment_hash, executionId: args.record.execution_id, transactionReference: settlement.transaction, reason: `settlement_proof_${chain.state}${chain.reason ? `:${chain.reason}` : ""}`, leaseToken: args.leaseToken });
+    await relinquishRecoverableLease(pending.record ?? args.record, args.leaseToken);
     return { status: 503, body: { error: "payment_settlement_reconciliation_required", payment_settled: false, transaction: settlement.transaction, prior_state: "settling", reconciliation: chain.state, reason: chain.reason } };
   }
 
@@ -440,7 +467,10 @@ async function finishDistributedSettlement(args: {
     responseBody,
     leaseToken: args.leaseToken,
   });
-  if (!committed.changed) return { status: 503, body: { error: "payment_commit_reconciliation_required", payment_settled: true, transaction: settlement.transaction } };
+  if (!committed.changed) {
+    await relinquishRecoverableLease(args.record, args.leaseToken);
+    return { status: 503, body: { error: "payment_commit_reconciliation_required", payment_settled: true, transaction: settlement.transaction } };
+  }
 
   recordX402Settlement({
     paymentHash: args.record.payment_hash,
@@ -488,6 +518,7 @@ async function resumeDistributedPayment(args: {
       existingIdempotencyKey: record.provider_idempotency_key,
     });
     if (executed.resolution.status !== "resolved") {
+      await relinquishRecoverableLease(record, args.leaseToken);
       return { status: 503, body: { error: "provider_recovery_required", prior_state: "executing", payment_settled: false, reason: executed.resolution.reason } };
     }
     await crashPoint("after_provider_effect", record.payment_hash, record.execution_id);
@@ -502,6 +533,7 @@ async function resumeDistributedPayment(args: {
       input: args.input,
     });
     if (executed.resolution.status !== "resolved") {
+      await relinquishRecoverableLease(record, args.leaseToken);
       return { status: 503, body: { error: "provider_recovery_required", prior_state: "executing", payment_settled: false, reason: executed.resolution.reason } };
     }
     await crashPoint("after_provider_effect", record.payment_hash, record.execution_id);
@@ -510,7 +542,10 @@ async function resumeDistributedPayment(args: {
   }
 
   if (record.state === "reserved" || record.state === "executing") {
-    if (!resolution || resolution.status !== "resolved" || !recipe) return { status: 503, body: { error: "payment_recovery_data_incomplete", payment_settled: false } };
+    if (!resolution || resolution.status !== "resolved" || !recipe) {
+      await relinquishRecoverableLease(record, args.leaseToken);
+      return { status: 503, body: { error: "payment_recovery_data_incomplete", payment_settled: false } };
+    }
     const economics = recipeEconomics(recipe);
     const realized = providerCostForExecution(record.execution_id);
     if (!economics || economics.customer_price_microusd !== Number(args.requirements.amount)) {
@@ -530,7 +565,10 @@ async function resumeDistributedPayment(args: {
       network: args.requirements.network,
       leaseToken: args.leaseToken,
     });
-    if (!done.changed || !done.record) return { status: 503, body: { error: "payment_state_transition_failed", payment_settled: false } };
+    if (!done.changed || !done.record) {
+      await relinquishRecoverableLease(record, args.leaseToken);
+      return { status: 503, body: { error: "payment_state_transition_failed", payment_settled: false } };
+    }
     record = done.record;
   }
 
@@ -546,6 +584,7 @@ async function resumeDistributedPayment(args: {
     return { status: 409, body: { error: "payment_outcome_ambiguous", prior_state: "ambiguous", payment_settled: false } };
   }
   if (!resolution || resolution.status !== "resolved" || !recipe || record.customer_price_microusd === null) {
+    await relinquishRecoverableLease(record, args.leaseToken);
     return { status: 503, body: { error: "payment_recovery_data_incomplete", prior_state: record.state, payment_settled: false } };
   }
   return finishDistributedSettlement({
