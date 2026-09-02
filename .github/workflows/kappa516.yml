@@ -1,0 +1,33 @@
+name: Kappa.5.16 Strict Chain Finality Policy
+on:
+  push:
+    branches: [product-kappa516-strict-chain-finality-policy]
+  pull_request:
+    branches: [main]
+
+jobs:
+  strict-chain-finality-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Kappa.5.16 proof
+        run: npx tsx src/experimentKappa516.ts
+      - name: Kappa.5.5 regression tests
+        run: npx vitest run tests/productKappa55SettlementFinality.test.ts
+      - name: Kappa.5.4 regression tests
+        run: npx vitest run tests/productKappa54OnchainSettlementProof.test.ts
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Verify Kappa.5.16 evidence exists
+        run: test -s artifacts/product-kappa516-strict-chain-finality-policy.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: product-kappa516-strict-chain-finality-policy
+          path: artifacts/product-kappa516-strict-chain-finality-policy.json
