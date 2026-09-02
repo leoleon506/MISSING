@@ -1,0 +1,54 @@
+name: Operational Readiness 3 Deployment Migration Rollback
+
+on:
+  push:
+    branches:
+      - operational-readiness-3-deployment-migration-rollback
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  deployment-migration-rollback:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: missing
+          POSTGRES_PASSWORD: missing
+          POSTGRES_DB: missing_or3
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U missing -d missing_or3"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Operational deployment migration rollback drill
+        env:
+          MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_or3?sslmode=disable
+          MISSING_POSTGRES_SSLMODE: disable
+          MISSING_DISTRIBUTED_MONEY_ENABLED: "1"
+          MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED: "0"
+          MISSING_OR3_PREVIOUS_RELEASE_SHA: b0f4336d91a7abf0a76ae9bea9a2c6cb831c7f4e
+        run: npx tsx src/operationalReadiness3.ts
+      - name: Verify evidence exists
+        run: test -s artifacts/operational-readiness-3-deployment-migration-rollback.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: operational-readiness-3-deployment-migration-rollback
+          path: artifacts/operational-readiness-3-deployment-migration-rollback.json
