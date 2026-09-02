@@ -27,6 +27,22 @@ const SENSITIVE_RECIPE_HEADERS = new Set([
   "set-cookie",
 ]);
 
+export interface AttemptRecipeOptions {
+  headerOverrides?: Record<string, string>;
+}
+
+export interface ResolveCapabilityOptions {
+  timeoutMs?: number;
+  meterEconomics?: boolean;
+  executionId?: string | null;
+  /** Pin recovery to the exact recipe that was durably recorded before the external call. */
+  recipeFingerprint?: string;
+  /** Prevent failover to a second write provider after a POST attempt has started. */
+  stopAfterPostAttempt?: boolean;
+  /** Runs before the external provider call and may durably persist execution intent. */
+  beforeAttempt?: (recipe: VerifiedRecipe) => Promise<AttemptRecipeOptions | void>;
+}
+
 function stateFor(recipe: VerifiedRecipe): RuntimeHealth {
   const existing = health.get(recipe.recipe_fingerprint);
   if (existing) {
@@ -98,8 +114,20 @@ function validateGeneratedHeaderName(name: string) {
   return normalized;
 }
 
-function renderHeaders(recipe: VerifiedRecipe): Record<string, string> {
+function normalizedHeaderOverrides(value: Record<string, string> | undefined): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const [name, raw] of Object.entries(value ?? {})) {
+    const normalized = validateGeneratedHeaderName(name);
+    if (typeof raw !== "string" || !raw.trim()) throw new Error(`Invalid generated header override value: ${name}`);
+    result.set(normalized, raw);
+  }
+  return result;
+}
+
+function renderHeaders(recipe: VerifiedRecipe, overridesInput?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = { accept: "application/json" };
+  const overrides = normalizedHeaderOverrides(overridesInput);
+  const consumedOverrides = new Set<string>();
   for (const [name, value] of Object.entries(recipe.static_headers ?? {})) {
     const normalized = validateStaticHeaderName(name);
     if (typeof value !== "string" || !value.trim()) throw new Error(`Invalid static header value: ${name}`);
@@ -116,7 +144,14 @@ function renderHeaders(recipe: VerifiedRecipe): Record<string, string> {
     if (binding.location !== "header" || binding.generator !== "uuid_v4") throw new Error("Invalid generated header binding");
     const normalized = validateGeneratedHeaderName(binding.name);
     if (headers[normalized] !== undefined) throw new Error(`Generated header conflicts with another recipe header: ${binding.name}`);
-    headers[normalized] = randomUUID();
+    const override = overrides.get(normalized);
+    headers[normalized] = override ?? randomUUID();
+    if (override !== undefined) consumedOverrides.add(normalized);
+  }
+  for (const [normalized, value] of overrides) {
+    if (consumedOverrides.has(normalized)) continue;
+    if (headers[normalized] !== undefined) throw new Error(`Generated header override conflicts with another recipe header: ${normalized}`);
+    headers[normalized] = value;
   }
   return headers;
 }
@@ -136,9 +171,9 @@ function renderJsonBody(recipe: VerifiedRecipe, input: RuntimeInput): string | u
   return JSON.stringify(body);
 }
 
-export function renderRecipeRequest(recipe: VerifiedRecipe, input: RuntimeInput): { url: string; init: RequestInit } {
+export function renderRecipeRequest(recipe: VerifiedRecipe, input: RuntimeInput, options: AttemptRecipeOptions = {}): { url: string; init: RequestInit } {
   const url = renderRecipeUrl(recipe, input);
-  const headers = renderHeaders(recipe);
+  const headers = renderHeaders(recipe, options.headerOverrides);
   const body = renderJsonBody(recipe, input);
   if (recipe.method === "POST") headers["content-type"] = "application/json";
   return {
@@ -173,11 +208,11 @@ export function projectRecipeOutput(recipe: VerifiedRecipe, input: RuntimeInput,
 }
 
 /** Execute one replay-verified recipe without mutating product routing state. */
-export async function attemptRecipe(recipe: VerifiedRecipe, input: RuntimeInput, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<{ attempt: RuntimeAttempt; output?: Record<string, unknown> }> {
+export async function attemptRecipe(recipe: VerifiedRecipe, input: RuntimeInput, timeoutMs = DEFAULT_TIMEOUT_MS, options: AttemptRecipeOptions = {}): Promise<{ attempt: RuntimeAttempt; output?: Record<string, unknown> }> {
   const started = Date.now();
   let url: string | null = null;
   try {
-    const rendered = renderRecipeRequest(recipe, input);
+    const rendered = renderRecipeRequest(recipe, input, options);
     url = rendered.url;
     const response = await fetch(url, { ...rendered.init, signal: AbortSignal.timeout(timeoutMs) });
     const latency_ms = Date.now() - started;
@@ -237,13 +272,17 @@ function scheduleAgentRankExploration(capability: string, registered: VerifiedRe
 export async function resolveCapability(
   capability: string,
   input: RuntimeInput,
-  options: { timeoutMs?: number; meterEconomics?: boolean; executionId?: string | null } = {},
+  options: ResolveCapabilityOptions = {},
 ): Promise<ResolveResult> {
-  const registered = recipesForCapability(capability);
-  if (!registered.length) return { status: "unavailable", capability, reason: "No replay-verified recipe is registered for this capability", attempts: [] };
+  const allRegistered = recipesForCapability(capability);
+  if (!allRegistered.length) return { status: "unavailable", capability, reason: "No replay-verified recipe is registered for this capability", attempts: [] };
+  const registered = options.recipeFingerprint
+    ? allRegistered.filter(recipe => recipe.recipe_fingerprint === options.recipeFingerprint)
+    : allRegistered;
+  if (!registered.length) return { status: "unavailable", capability, reason: "The durably recorded recovery recipe is no longer registered for this capability", attempts: [] };
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const agentRankOrdered = rankRecipesForExecution(registered);
+  const agentRankOrdered = options.recipeFingerprint ? registered : rankRecipesForExecution(registered);
   const recipes = rankRecipesByEconomics(agentRankOrdered);
   if (!recipes.length && economicsEnforcementEnabled()) {
     return { status: "unavailable", capability, reason: "No replay-verified provider satisfies the configured Kappa economics policy", attempts: [] };
@@ -251,8 +290,9 @@ export async function resolveCapability(
 
   const attempts: RuntimeAttempt[] = [];
   for (const recipe of recipes) {
-    if (stateFor(recipe).state === "open") continue;
-    const result = await attemptRecipe(recipe, input, timeoutMs);
+    if (stateFor(recipe).state === "open" && !options.recipeFingerprint) continue;
+    const prepared = await options.beforeAttempt?.(recipe);
+    const result = await attemptRecipe(recipe, input, timeoutMs, prepared ?? {});
     const attemptPosition = attempts.length;
     attempts.push(result.attempt);
     recordAgentRankAttempt({ capability, attempt: result.attempt, attemptPosition, rescue: attemptPosition > 0 && Boolean(result.output) });
@@ -267,10 +307,11 @@ export async function resolveCapability(
     if (result.output) {
       markSuccess(recipe);
       if (options.meterEconomics !== false) recordEconomicsResolution({ capability, recipe });
-      scheduleAgentRankExploration(capability, registered, recipe, timeoutMs);
+      scheduleAgentRankExploration(capability, allRegistered, recipe, timeoutMs);
       return { status: "resolved", capability, provider: recipe.provider, recipe_fingerprint: recipe.recipe_fingerprint, output: result.output, attempts };
     }
     markFailure(recipe);
+    if (options.stopAfterPostAttempt && recipe.method === "POST") break;
   }
 
   return {
