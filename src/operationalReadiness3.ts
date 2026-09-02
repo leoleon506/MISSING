@@ -32,7 +32,7 @@ const before = await mod.distributedPayment(${JSON.stringify(hashes.before)});
 const after = await mod.distributedPayment(${JSON.stringify(hashes.after)});
 const duplicate = await mod.reserveDistributedPayment({
   paymentHash:${JSON.stringify(hashes.after)},
-  requestHash:${JSON.stringify(agentRequestHash({ capability: "or3.after", input: { phase: "after" } }))},
+  requestHash:${JSON.stringify(agentRequestHash("or3.after", { phase: "after" }))},
   executionId:"or3-rollback-duplicate",
   capability:"or3.after"
 });
@@ -64,8 +64,8 @@ async function main() {
 
   const beforeHash = paymentHash("before-upgrade");
   const afterHash = paymentHash("after-upgrade");
-  const beforeRequest = agentRequestHash({ capability: "or3.before", input: { phase: "before" } });
-  const afterRequest = agentRequestHash({ capability: "or3.after", input: { phase: "after" } });
+  const beforeRequest = agentRequestHash("or3.before", { phase: "before" });
+  const afterRequest = agentRequestHash("or3.after", { phase: "after" });
 
   const before = await reserveDistributedPayment({ paymentHash: beforeHash, requestHash: beforeRequest, executionId: "or3-before", capability: "or3.before" });
   if (!before.reserved) throw new Error("could not create pre-upgrade durable payment");
