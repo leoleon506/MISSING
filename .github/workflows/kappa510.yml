@@ -1,0 +1,51 @@
+name: Kappa.5.10 Lease Fencing Stale Owner Exclusion
+
+on:
+  push:
+    branches:
+      - product-kappa510-lease-fencing-stale-owner
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lease-fencing:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: missing
+          POSTGRES_PASSWORD: missing
+          POSTGRES_DB: missing_kappa510
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U missing -d missing_kappa510"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Run Kappa.5.10 stale-owner fencing proof
+        env:
+          MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_kappa510?sslmode=disable
+          MISSING_POSTGRES_SSLMODE: disable
+        run: npx tsx src/experimentKappa510.ts
+      - name: Verify Kappa.5.10 evidence exists
+        run: test -s artifacts/product-kappa510-lease-fencing.json
+      - name: Upload Kappa.5.10 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-kappa510-lease-fencing
+          path: artifacts/product-kappa510-lease-fencing.json
