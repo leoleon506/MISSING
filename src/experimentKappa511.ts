@@ -10,11 +10,17 @@ import {
   truncateDistributedMoney,
 } from "./runtime/distributedMoney.js";
 
+const leaseMs = 500;
+const heartbeatMs = 75;
+const longOperationMs = 2_000;
+const takeoverProbeMs = 900;
+const crashRecoveryWaitMs = 750;
+
 process.env.MISSING_AGENT_PAYMENTS_ENABLED = "1";
 process.env.MISSING_DISTRIBUTED_MONEY_ENABLED = "1";
 process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED = "0";
-process.env.MISSING_X402_RECOVERY_LEASE_MS = "100";
-process.env.MISSING_X402_LEASE_HEARTBEAT_MS = "25";
+process.env.MISSING_X402_RECOVERY_LEASE_MS = String(leaseMs);
+process.env.MISSING_X402_LEASE_HEARTBEAT_MS = String(heartbeatMs);
 process.env.MISSING_X402_ENABLED = "1";
 process.env.MISSING_X402_NETWORK = "eip155:84532";
 process.env.MISSING_X402_ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
@@ -147,16 +153,19 @@ await truncateDistributedMoney();
 const evidence: any = {
   product: "Kappa.5.11",
   invariant: "production distributed owners carry the exact fence generation and renew leases during legitimate long provider and settlement operations",
-  lease_ms: 100,
-  heartbeat_ms: 25,
+  lease_ms: leaseMs,
+  heartbeat_ms: heartbeatMs,
+  long_operation_ms: longOperationMs,
+  takeover_probe_ms: takeoverProbeMs,
+  crash_recovery_wait_ms: crashRecoveryWaitMs,
   scenarios: [],
 };
 
-// 1) Provider latency far beyond the lease TTL must not cause ownership loss.
+// 1) Provider latency spans four lease TTLs. Ownership must remain on fence 1 throughout.
 {
   const capability = "kappa511_slow_provider";
   const paymentSignature = signature(capability);
-  providerDelayMs = 350;
+  providerDelayMs = longOperationMs;
   settlementDelayMs = 0;
   const result = await worker(capability, paymentSignature);
   const response = parsed(result.stdout);
@@ -169,16 +178,16 @@ const evidence: any = {
     provider_effects: providerEffects.get(capability) ?? 0,
     final_state: row?.state ?? null,
     final_fence: row?.lease_fence ?? null,
-    pass: result.duration_ms > 300 && response.status === 200 && (providerCalls.get(capability) ?? 0) === 1 && (providerEffects.get(capability) ?? 0) === 1 && row?.state === "settled" && row.lease_fence === 1,
+    pass: result.duration_ms > longOperationMs && response.status === 200 && (providerCalls.get(capability) ?? 0) === 1 && (providerEffects.get(capability) ?? 0) === 1 && row?.state === "settled" && row.lease_fence === 1,
   });
 }
 
-// 2) Settlement latency far beyond the lease TTL is protected by the same ownership session.
+// 2) Settlement latency also spans four lease TTLs and must retain the same fence.
 {
   const capability = "kappa511_slow_settlement";
   const paymentSignature = signature(capability);
   providerDelayMs = 0;
-  settlementDelayMs = 350;
+  settlementDelayMs = longOperationMs;
   const beforeEffects = settlementEffects;
   const result = await worker(capability, paymentSignature);
   const response = parsed(result.stdout);
@@ -190,19 +199,19 @@ const evidence: any = {
     settlement_effects: settlementEffects - beforeEffects,
     final_state: row?.state ?? null,
     final_fence: row?.lease_fence ?? null,
-    pass: result.duration_ms > 300 && response.status === 200 && settlementEffects - beforeEffects === 1 && row?.state === "settled" && row.lease_fence === 1,
+    pass: result.duration_ms > longOperationMs && response.status === 200 && settlementEffects - beforeEffects === 1 && row?.state === "settled" && row.lease_fence === 1,
   });
 }
 
-// 3) While a slow provider is in flight, another replica cannot steal the lease because the heartbeat keeps it current.
+// 3) Probe well after the original TTL. Without heartbeat the lease would be claimable; with heartbeat takeover must fail.
 {
   const capability = "kappa511_takeover_blocked";
   const paymentSignature = signature(capability);
   const paymentHash = hashOf(paymentSignature);
-  providerDelayMs = 350;
+  providerDelayMs = longOperationMs;
   settlementDelayMs = 0;
   const running = worker(capability, paymentSignature);
-  await sleep(190);
+  await sleep(takeoverProbeMs);
   const attempted = await claimDistributedRecovery({ paymentHash, requestHash: (await distributedPayment(paymentHash))?.request_hash ?? "", leaseToken: randomUUID() });
   const result = await running;
   const response = parsed(result.stdout);
@@ -210,14 +219,15 @@ const evidence: any = {
   evidence.scenarios.push({
     name: "heartbeat_blocks_premature_takeover",
     takeover_claimed: attempted.claimed,
+    probe_after_original_ttl: takeoverProbeMs > leaseMs,
     response_status: response.status,
     final_state: row?.state ?? null,
     final_fence: row?.lease_fence ?? null,
-    pass: attempted.claimed === false && response.status === 200 && row?.state === "settled" && row.lease_fence === 1,
+    pass: takeoverProbeMs > leaseMs && attempted.claimed === false && response.status === 200 && row?.state === "settled" && row.lease_fence === 1,
   });
 }
 
-// 4) When the owner process dies, its heartbeat dies too; after TTL another replica can take over and receives the next fence.
+// 4) Process death stops heartbeat. After more than one TTL another replica must claim fence 2.
 {
   const capability = "kappa511_crashed_owner_takeover";
   const paymentSignature = signature(capability);
@@ -226,17 +236,18 @@ const evidence: any = {
   settlementDelayMs = 0;
   await worker(capability, paymentSignature, true, 92);
   const before = await distributedPayment(paymentHash);
-  await sleep(150);
+  await sleep(crashRecoveryWaitMs);
   const claimed = await claimDistributedRecovery({ paymentHash, requestHash: before?.request_hash ?? "", leaseToken: randomUUID() });
   const row = await distributedPayment(paymentHash);
   evidence.scenarios.push({
     name: "heartbeat_stops_on_process_death_and_takeover_advances_fence",
     prior_state: before?.state ?? null,
     prior_fence: before?.lease_fence ?? null,
+    waited_beyond_ttl: crashRecoveryWaitMs > leaseMs,
     takeover_claimed: claimed.claimed,
     takeover_fence: claimed.leaseFence,
     final_fence: row?.lease_fence ?? null,
-    pass: before?.state === "executing" && before.lease_fence === 1 && claimed.claimed === true && claimed.leaseFence === 2 && row?.lease_fence === 2,
+    pass: crashRecoveryWaitMs > leaseMs && before?.state === "executing" && before.lease_fence === 1 && claimed.claimed === true && claimed.leaseFence === 2 && row?.lease_fence === 2,
   });
 }
 

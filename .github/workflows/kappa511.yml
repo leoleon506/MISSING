@@ -33,6 +33,7 @@ jobs:
         name: TypeScript build
       - name: Run Kappa.5.11 production fence heartbeat proof
         env:
+          MISSING_X402_FACILITATOR_IDEMPOTENCY: "1"
           MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_kappa511?sslmode=disable
           MISSING_POSTGRES_SSLMODE: disable
         run: npx tsx src/experimentKappa511.ts

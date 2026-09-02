@@ -13,15 +13,18 @@ export function providerRecoveryPolicy(recipe: VerifiedRecipe): ProviderRecovery
     return { mode: "read_only", idempotency_header: null, reason: "GET recipe is replayable without creating a provider-side write" };
   }
 
+  // Fail closed: an idempotency-shaped header is not evidence that the provider
+  // deduplicates writes. Only sufficient product_live safe_post evidence may
+  // authorize automatic replay of a POST after an ambiguous outcome.
   const safePost = recipe.verification.source === "product_live" ? recipe.verification.safe_post : undefined;
-  const explicit = safePost?.signals.find(signal => signal.kind === "idempotency_key" && signal.sufficient && signal.location === "header" && signal.name?.trim());
+  const explicit = safePost?.signals.find(signal =>
+    signal.kind === "idempotency_key"
+    && signal.sufficient
+    && signal.location === "header"
+    && signal.name?.trim(),
+  );
   if (explicit?.name) {
     return { mode: "idempotent", idempotency_header: explicit.name, reason: "Verified POST recipe exposes a sufficient provider idempotency header" };
-  }
-
-  const generated = recipe.generated_headers?.find(binding => /idempotency/i.test(binding.name));
-  if (generated) {
-    return { mode: "idempotent", idempotency_header: generated.name, reason: "Verified POST recipe generates an idempotency header" };
   }
 
   return { mode: "ambiguous", idempotency_header: null, reason: "POST recipe has no verified idempotency or reconciliation contract" };

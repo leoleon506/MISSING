@@ -44,6 +44,15 @@ export function x402Enabled(): boolean {
   return process.env.MISSING_X402_ENABLED === "1";
 }
 
+/**
+ * Explicit operator assertion that the configured facilitator deduplicates
+ * settlement submissions carrying the same MISSING settlement intent.
+ * Merely sending an Idempotency-Key header is not treated as evidence.
+ */
+export function x402FacilitatorIdempotencyEnabled(): boolean {
+  return process.env.MISSING_X402_FACILITATOR_IDEMPOTENCY === "1";
+}
+
 function env(name: string): string | null {
   const value = process.env[name]?.trim();
   return value ? value : null;
@@ -57,6 +66,7 @@ export function x402Config() {
     payTo: env("MISSING_X402_PAY_TO"),
     facilitatorUrl: env("MISSING_X402_FACILITATOR_URL"),
     facilitatorBearer: env("MISSING_X402_FACILITATOR_BEARER"),
+    facilitatorIdempotency: x402FacilitatorIdempotencyEnabled(),
     maxTimeoutSeconds: Number(process.env.MISSING_X402_MAX_TIMEOUT_SECONDS ?? 60),
   };
 }
@@ -147,12 +157,16 @@ export async function verifyX402Payment(args: { paymentSignature: string; requir
 
 export async function settleX402Payment(args: { paymentPayload: unknown; requirements: X402Requirements; settlementIntentId?: string | null }): Promise<X402Settlement> {
   const intent = args.settlementIntentId?.trim() || null;
+  if (intent && !x402FacilitatorIdempotencyEnabled()) {
+    throw new Error("x402 facilitator settlement idempotency contract is not enabled");
+  }
+  const idempotent = Boolean(intent);
   const result = await facilitatorPost("settle", {
     x402Version: 2,
     paymentPayload: args.paymentPayload,
     paymentRequirements: args.requirements,
-    ...(intent ? { extensions: { missingSettlementIntentId: intent } } : {}),
-  }, intent ? { "Idempotency-Key": intent, "X-MISSING-Settlement-Intent": intent } : {});
+    ...(idempotent ? { extensions: { missingSettlementIntentId: intent } } : {}),
+  }, idempotent && intent ? { "Idempotency-Key": intent, "X-MISSING-Settlement-Intent": intent } : {});
   return {
     success: result?.success === true,
     payer: typeof result?.payer === "string" ? result.payer : undefined,
