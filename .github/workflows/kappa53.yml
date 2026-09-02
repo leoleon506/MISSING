@@ -22,12 +22,6 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-    env:
-      MISSING_DISTRIBUTED_MONEY_ENABLED: "1"
-      MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED: "0"
-      MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_kappa53?sslmode=disable
-      MISSING_POSTGRES_SSLMODE: disable
-      MISSING_KAPPA53_RACES: "20"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -42,11 +36,19 @@ jobs:
       - name: TypeScript build
         run: npm run build
       - name: Run Kappa.5.3 two-replica exclusion proof
+        env:
+          MISSING_DISTRIBUTED_MONEY_ENABLED: "1"
+          MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED: "0"
+          MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_kappa53?sslmode=disable
+          MISSING_POSTGRES_SSLMODE: disable
+          MISSING_KAPPA53_RACES: "20"
         run: npx tsx src/experimentKappa53.ts
+      - name: Verify Kappa.5.3 evidence exists
+        run: test -s artifacts/product-kappa53-two-replica-exclusion.json
       - name: Upload Kappa.5.3 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: product-kappa53-two-replica-exclusion
           path: artifacts/product-kappa53-two-replica-exclusion.json
-          if-no-files-found: error
+          if-no-files-found: warn
