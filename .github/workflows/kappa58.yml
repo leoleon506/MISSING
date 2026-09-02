@@ -37,6 +37,7 @@ jobs:
         env:
           MISSING_DISTRIBUTED_MONEY_ENABLED: "1"
           MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED: "0"
+          MISSING_X402_FACILITATOR_IDEMPOTENCY: "1"
           MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_kappa58?sslmode=disable
           MISSING_POSTGRES_SSLMODE: disable
         run: npx tsx src/experimentKappa58.ts
