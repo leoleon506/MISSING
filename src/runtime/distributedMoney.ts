@@ -331,11 +331,12 @@ export async function claimDistributedRecovery(args: { paymentHash: string; requ
   const rec = parseRecordLine(stdout.trim());
   if (rec && rec.recovery_protocol_version !== CURRENT_DISTRIBUTED_RECOVERY_PROTOCOL_VERSION) {
     const observed = rec.recovery_protocol_version === null ? "legacy" : String(rec.recovery_protocol_version);
+    const activeState = rec.state as "reserved" | "executing" | "provider_done" | "settling";
     const quarantined = await markDistributedPaymentAmbiguous({
       paymentHash: rec.payment_hash,
       executionId: rec.execution_id,
       reason: `recovery_protocol_version_untrusted:${observed}`,
-      from: rec.state,
+      from: activeState,
       leaseToken: args.leaseToken,
       leaseFence: rec.lease_fence,
     });
