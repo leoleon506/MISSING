@@ -7,6 +7,7 @@ export type TransactionalPaymentState = "reserved" | "settling" | "settled" | "f
 
 export interface TransactionalPaymentRecord {
   payment_hash: string;
+  request_hash: string | null;
   execution_id: string;
   capability: string;
   state: TransactionalPaymentState;
@@ -64,6 +65,7 @@ function db(): DatabaseSync | null {
   opened.exec(`
     CREATE TABLE IF NOT EXISTS x402_payments (
       payment_hash TEXT PRIMARY KEY,
+      request_hash TEXT,
       execution_id TEXT NOT NULL UNIQUE,
       capability TEXT NOT NULL,
       state TEXT NOT NULL CHECK (state IN ('reserved','settling','settled','failed')),
@@ -82,6 +84,8 @@ function db(): DatabaseSync | null {
       ON x402_payments(transaction_reference)
       WHERE transaction_reference IS NOT NULL;
   `);
+  const columns = opened.prepare("PRAGMA table_info(x402_payments)").all() as Array<{ name: string }>;
+  if (!columns.some(column => column.name === "request_hash")) opened.exec("ALTER TABLE x402_payments ADD COLUMN request_hash TEXT");
   database = opened;
   databasePath = path;
   return opened;
@@ -89,7 +93,11 @@ function db(): DatabaseSync | null {
 
 function row(value: unknown): TransactionalPaymentRecord | null {
   if (!value || typeof value !== "object") return null;
-  return value as TransactionalPaymentRecord;
+  const raw = value as Record<string, unknown>;
+  return {
+    ...(raw as unknown as TransactionalPaymentRecord),
+    request_hash: raw.request_hash == null ? null : String(raw.request_hash),
+  };
 }
 
 export function transactionalPayment(paymentHash: string): TransactionalPaymentRecord | null {
@@ -98,7 +106,7 @@ export function transactionalPayment(paymentHash: string): TransactionalPaymentR
   return row(opened.prepare("SELECT * FROM x402_payments WHERE payment_hash = ?").get(paymentHash));
 }
 
-export function reserveTransactionalPayment(args: { paymentHash: string; executionId: string; capability: string }) {
+export function reserveTransactionalPayment(args: { paymentHash: string; requestHash: string; executionId: string; capability: string }) {
   const opened = db();
   if (!opened) return { enabled: false as const, reserved: false as const, prior: null };
   const now = new Date().toISOString();
@@ -106,9 +114,9 @@ export function reserveTransactionalPayment(args: { paymentHash: string; executi
   try {
     const result = opened.prepare(`
       INSERT OR IGNORE INTO x402_payments
-        (payment_hash, execution_id, capability, state, created_at, updated_at)
-      VALUES (?, ?, ?, 'reserved', ?, ?)
-    `).run(args.paymentHash, args.executionId, args.capability, now, now);
+        (payment_hash, request_hash, execution_id, capability, state, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'reserved', ?, ?)
+    `).run(args.paymentHash, args.requestHash, args.executionId, args.capability, now, now);
     const prior = transactionalPayment(args.paymentHash);
     opened.exec("COMMIT");
     return { enabled: true as const, reserved: result.changes === 1, prior };
@@ -212,6 +220,8 @@ export function transactionalMoneySnapshot() {
       ready: false,
       response_cache_enabled: transactionalResponseCacheEnabled(),
       payments: 0,
+      request_bound: 0,
+      legacy_unbound: 0,
       reserved: 0,
       settling: 0,
       settled: 0,
@@ -221,6 +231,8 @@ export function transactionalMoneySnapshot() {
   const counts = opened.prepare(`
     SELECT
       COUNT(*) AS payments,
+      SUM(CASE WHEN request_hash IS NOT NULL THEN 1 ELSE 0 END) AS request_bound,
+      SUM(CASE WHEN request_hash IS NULL THEN 1 ELSE 0 END) AS legacy_unbound,
       SUM(CASE WHEN state='reserved' THEN 1 ELSE 0 END) AS reserved,
       SUM(CASE WHEN state='settling' THEN 1 ELSE 0 END) AS settling,
       SUM(CASE WHEN state='settled' THEN 1 ELSE 0 END) AS settled,
@@ -233,6 +245,8 @@ export function transactionalMoneySnapshot() {
     ready: true,
     response_cache_enabled: transactionalResponseCacheEnabled(),
     payments: n(counts.payments),
+    request_bound: n(counts.request_bound),
+    legacy_unbound: n(counts.legacy_unbound),
     reserved: n(counts.reserved),
     settling: n(counts.settling),
     settled: n(counts.settled),
