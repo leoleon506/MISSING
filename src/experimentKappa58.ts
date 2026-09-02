@@ -47,14 +47,28 @@ const evidence: any = {
   const p = payment("ambiguous-post");
   const executionId = randomUUID();
   const reserved = await reserveDistributedPayment({ paymentHash: p, requestHash, executionId, capability });
-  if (!reserved.reserved) throw new Error("unable to reserve ambiguous scenario");
-  await markDistributedPaymentExecuting({ paymentHash: p, executionId, recipeFingerprint: "post-no-idempotency", recoveryMode: "ambiguous" });
+  if (!reserved.reserved || !reserved.leaseFence) throw new Error("unable to reserve ambiguous scenario");
+  await markDistributedPaymentExecuting({
+    paymentHash: p,
+    executionId,
+    recipeFingerprint: "post-no-idempotency",
+    recoveryMode: "ambiguous",
+    leaseToken: executionId,
+    leaseFence: reserved.leaseFence,
+  });
   const providerEffects = 1; // external write happened, then process died before durable provider_done.
   await sleep(130);
   const recoveryToken = randomUUID();
   const claim = await claimDistributedRecovery({ paymentHash: p, requestHash, leaseToken: recoveryToken });
-  if (!claim.claimed) throw new Error("unable to claim ambiguous recovery");
-  await markDistributedPaymentAmbiguous({ paymentHash: p, executionId, reason: "provider_outcome_unknown_without_idempotency", from: "executing", leaseToken: recoveryToken });
+  if (!claim.claimed || !claim.leaseFence) throw new Error("unable to claim ambiguous recovery");
+  await markDistributedPaymentAmbiguous({
+    paymentHash: p,
+    executionId,
+    reason: "provider_outcome_unknown_without_idempotency",
+    from: "executing",
+    leaseToken: recoveryToken,
+    leaseFence: claim.leaseFence,
+  });
   const row = await distributedPayment(p);
   evidence.scenarios.push({
     name: "non_idempotent_post_quarantined",
@@ -83,17 +97,34 @@ const evidence: any = {
   };
 
   const reserved = await reserveDistributedPayment({ paymentHash: p, requestHash, executionId, capability });
-  if (!reserved.reserved) throw new Error("unable to reserve idempotent scenario");
-  await markDistributedPaymentExecuting({ paymentHash: p, executionId, recipeFingerprint: "post-idempotent", recoveryMode: "idempotent", providerIdempotencyKey: stableKey });
+  if (!reserved.reserved || !reserved.leaseFence) throw new Error("unable to reserve idempotent scenario");
+  await markDistributedPaymentExecuting({
+    paymentHash: p,
+    executionId,
+    recipeFingerprint: "post-idempotent",
+    recoveryMode: "idempotent",
+    providerIdempotencyKey: stableKey,
+    leaseToken: executionId,
+    leaseFence: reserved.leaseFence,
+  });
   providerCall(stableKey); // write happened; crash before provider_done.
   await sleep(130);
   const recoveryToken = randomUUID();
   const claim = await claimDistributedRecovery({ paymentHash: p, requestHash, leaseToken: recoveryToken });
-  if (!claim.claimed || claim.record?.provider_idempotency_key !== stableKey) throw new Error("idempotent recovery identity was not durable");
+  if (!claim.claimed || !claim.leaseFence || claim.record?.provider_idempotency_key !== stableKey) throw new Error("idempotent recovery identity was not durable");
   const resolution = providerCall(claim.record.provider_idempotency_key);
   await markDistributedProviderDone({
-    paymentHash: p, executionId, customerPriceMicrousd: 5000, providerCostMicrousd: 1000, grossMarginMicrousd: 4000,
-    providerAttempts: providerCalls, unknownProviderCostAttempts: 0, resolution, network: "eip155:84532", leaseToken: recoveryToken,
+    paymentHash: p,
+    executionId,
+    customerPriceMicrousd: 5000,
+    providerCostMicrousd: 1000,
+    grossMarginMicrousd: 4000,
+    providerAttempts: providerCalls,
+    unknownProviderCostAttempts: 0,
+    resolution,
+    network: "eip155:84532",
+    leaseToken: recoveryToken,
+    leaseFence: claim.leaseFence,
   });
   const row = await distributedPayment(p);
   evidence.scenarios.push({
@@ -112,7 +143,13 @@ const evidence: any = {
   const executionId = randomUUID();
   const intent = stableSettlementIntentId(p, requestHash);
   const requirements: X402Requirements = {
-    scheme: "exact", network: "eip155:84532", amount: "5000", asset: process.env.MISSING_X402_ASSET!, payTo: process.env.MISSING_X402_PAY_TO!, maxTimeoutSeconds: 60, extra: { name: "USDC", version: "2" },
+    scheme: "exact",
+    network: "eip155:84532",
+    amount: "5000",
+    asset: process.env.MISSING_X402_ASSET!,
+    payTo: process.env.MISSING_X402_PAY_TO!,
+    maxTimeoutSeconds: 60,
+    extra: { name: "USDC", version: "2" },
   };
   const facilitatorSeen = new Map<string, string>();
   let facilitatorCalls = 0;
@@ -132,22 +169,48 @@ const evidence: any = {
   }) as typeof fetch);
 
   const reserved = await reserveDistributedPayment({ paymentHash: p, requestHash, executionId, capability });
-  if (!reserved.reserved) throw new Error("unable to reserve settlement scenario");
+  if (!reserved.reserved || !reserved.leaseFence) throw new Error("unable to reserve settlement scenario");
   const resolution = { status: "resolved", recipe_fingerprint: "settlement-proof", output: { ok: true } };
   await markDistributedPaymentSettling({
-    paymentHash: p, executionId, customerPriceMicrousd: 5000, providerCostMicrousd: 1000, grossMarginMicrousd: 4000,
-    providerAttempts: 1, unknownProviderCostAttempts: 0, resolution, network: requirements.network, settlementIntentId: intent,
+    paymentHash: p,
+    executionId,
+    customerPriceMicrousd: 5000,
+    providerCostMicrousd: 1000,
+    grossMarginMicrousd: 4000,
+    providerAttempts: 1,
+    unknownProviderCostAttempts: 0,
+    resolution,
+    network: requirements.network,
+    settlementIntentId: intent,
+    leaseToken: executionId,
+    leaseFence: reserved.leaseFence,
   });
   const first = await settleX402Payment({ paymentPayload: { payment: p }, requirements, settlementIntentId: intent });
   // Simulate crash here: transaction exists externally but was not persisted locally.
   await sleep(130);
   const recoveryToken = randomUUID();
   const claim = await claimDistributedRecovery({ paymentHash: p, requestHash, leaseToken: recoveryToken });
-  if (!claim.claimed || claim.record?.settlement_intent_id !== intent) throw new Error("settlement recovery intent was not durable");
+  if (!claim.claimed || !claim.leaseFence || claim.record?.settlement_intent_id !== intent) throw new Error("settlement recovery intent was not durable");
   const second = await settleX402Payment({ paymentPayload: { payment: p }, requirements, settlementIntentId: claim.record.settlement_intent_id });
   if (!first.transaction || first.transaction !== second.transaction) throw new Error("facilitator did not deduplicate settlement intent");
-  await markDistributedSettlementPending({ paymentHash: p, executionId, transactionReference: second.transaction, reason: "recovered_from_settlement_intent", leaseToken: recoveryToken });
-  await settleDistributedPayment({ paymentHash: p, executionId, transactionReference: second.transaction, responseStatus: 200, responseHeaders: {}, responseBody: { status: "resolved", recovery: "kappa58" }, leaseToken: recoveryToken });
+  await markDistributedSettlementPending({
+    paymentHash: p,
+    executionId,
+    transactionReference: second.transaction,
+    reason: "recovered_from_settlement_intent",
+    leaseToken: recoveryToken,
+    leaseFence: claim.leaseFence,
+  });
+  await settleDistributedPayment({
+    paymentHash: p,
+    executionId,
+    transactionReference: second.transaction,
+    responseStatus: 200,
+    responseHeaders: {},
+    responseBody: { status: "resolved", recovery: "kappa58" },
+    leaseToken: recoveryToken,
+    leaseFence: claim.leaseFence,
+  });
   const row = await distributedPayment(p);
   evidence.scenarios.push({
     name: "settlement_intent_recovers_unknown_transaction",
