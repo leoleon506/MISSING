@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import YAML from "yaml";
 import type { SupplyCandidate } from "./acquisition.js";
 import type { ProviderDiscoveryCandidate } from "./providerDiscovery.js";
+import {
+  assessSafePostVerification,
+  type SafePostParameterDescriptor,
+  type SafePostVerificationAssessment,
+} from "./safePostPolicy.js";
 import type { HttpMethod, ProjectionRule, RuntimeInput } from "./types.js";
 import { harvestVerificationInputs, type VerificationInputEvidence } from "./verificationInputHarvest.js";
 
@@ -23,12 +28,19 @@ export interface ProviderReadinessDiagnostics {
 }
 
 export interface OpenApiCompileResult {
-  status: "candidate_ready" | "needs_verification_inputs" | "needs_safe_verification" | "needs_provider_setup" | "unsupported";
+  status:
+    | "candidate_ready"
+    | "candidate_ready_for_safe_post_replay"
+    | "needs_verification_inputs"
+    | "needs_safe_verification"
+    | "needs_provider_setup"
+    | "unsupported";
   lead: ProviderDiscoveryCandidate;
   operation: { method: HttpMethod; path: string; operation_id: string | null; summary: string; score: number; matched_terms: string[] } | null;
   candidate: SupplyCandidate | null;
   verification_input_evidence: VerificationInputEvidence[];
   provider_readiness: ProviderReadinessDiagnostics;
+  safe_post_verification?: SafePostVerificationAssessment | null;
   missing: string[];
   reason: string | null;
 }
@@ -109,10 +121,19 @@ function operationParameters(spec: OpenApiObject, pathItem: any, operation: any)
   return combined.map(param => resolveRef(spec, param)).filter(Boolean);
 }
 
+function normalizedHeaderName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function idempotencyHeader(name: string): boolean {
+  const normalized = normalizedHeaderName(name);
+  return normalized === "idempotencykey" || normalized === "xidempotencykey";
+}
+
 function credentialRequirements(spec: OpenApiObject, pathItem: any, operation: any): string[] {
   const names = new Set<string>();
   for (const param of operationParameters(spec, pathItem, operation)) {
-    if (param?.in === "header" && param?.required === true && typeof param?.name === "string") names.add(param.name);
+    if (param?.in === "header" && param?.required === true && typeof param?.name === "string" && !idempotencyHeader(param.name)) names.add(param.name);
   }
   const security = operation?.security ?? spec.security;
   if (Array.isArray(security)) {
@@ -167,15 +188,25 @@ function deriveBindings(spec: OpenApiObject, pathItem: any, operation: any) {
   const path_bindings: Record<string, string> = {};
   const query_bindings: Record<string, string> = {};
   const parameters: Array<{ input_name: string; parameter: any }> = [];
+  const safe_descriptors: SafePostParameterDescriptor[] = [];
+
   for (const param of operationParameters(spec, pathItem, operation)) {
-    if (typeof param?.name !== "string" || (param.in !== "path" && param.in !== "query")) continue;
-    if (param.required !== true && param.in !== "path") continue;
+    if (typeof param?.name !== "string") continue;
+    const schema = resolveRef(spec, param.schema) ?? null;
+    const description = [param.description, schema?.description].filter(Boolean).join(" ");
+    if (param.in === "header") {
+      safe_descriptors.push({ name: param.name, input_name: null, location: "header", required: param.required === true, schema, description });
+      continue;
+    }
+    if (param.in !== "path" && param.in !== "query") continue;
     const inputName = slug(param.name, "input");
+    safe_descriptors.push({ name: param.name, input_name: inputName, location: "query", required: param.required === true, schema, description });
+    if (param.required !== true && param.in !== "path") continue;
     parameters.push({ input_name: inputName, parameter: param });
     if (param.in === "path") path_bindings[param.name] = `$input.${inputName}`;
     else query_bindings[param.name] = `$input.${inputName}`;
   }
-  return { path_bindings, query_bindings, parameters };
+  return { path_bindings, query_bindings, parameters, safe_descriptors };
 }
 
 function requestBodySchema(spec: OpenApiObject, operation: any): any {
@@ -187,24 +218,29 @@ function requestBodySchema(spec: OpenApiObject, operation: any): any {
 function deriveJsonBodyBindings(spec: OpenApiObject, operation: any) {
   const schema = requestBodySchema(spec, operation);
   if (!schema || schema.type !== "object" || !schema.properties || typeof schema.properties !== "object") {
-    return { body_bindings: null, parameters: [], reason: "POST requestBody must declare an application/json top-level object schema" };
+    return { body_bindings: null, parameters: [], safe_descriptors: [], reason: "POST requestBody must declare an application/json top-level object schema" };
   }
   const propertyNames = Object.keys(schema.properties).sort().slice(0, 12);
-  if (!propertyNames.length) return { body_bindings: null, parameters: [], reason: "POST requestBody object has no declared properties" };
+  if (!propertyNames.length) return { body_bindings: null, parameters: [], safe_descriptors: [], reason: "POST requestBody object has no declared properties" };
 
   const required = new Set<string>(Array.isArray(schema.required) ? schema.required.filter((field: unknown): field is string => typeof field === "string") : []);
   const selectedNames = required.size ? propertyNames.filter(name => required.has(name)) : propertyNames;
-  if (!selectedNames.length) return { body_bindings: null, parameters: [], reason: "POST requestBody required properties could not be mapped deterministically" };
+  if (!selectedNames.length) return { body_bindings: null, parameters: [], safe_descriptors: [], reason: "POST requestBody required properties could not be mapped deterministically" };
 
   const body_bindings: Record<string, string> = {};
   const parameters: Array<{ input_name: string; parameter: any }> = [];
-  for (const name of selectedNames) {
+  const safe_descriptors: SafePostParameterDescriptor[] = [];
+  for (const name of propertyNames) {
     const inputName = slug(name, "body_field");
     const propertySchema = resolveRef(spec, schema.properties[name]);
+    const isRequired = required.has(name) || required.size === 0;
+    const description = [propertySchema?.description].filter(Boolean).join(" ");
+    safe_descriptors.push({ name, input_name: inputName, location: "body", required: isRequired, schema: propertySchema ?? null, description });
+    if (!selectedNames.includes(name)) continue;
     body_bindings[name] = `$input.${inputName}`;
     parameters.push({ input_name: inputName, parameter: { name, required: true, schema: propertySchema } });
   }
-  return { body_bindings, parameters, reason: null };
+  return { body_bindings, parameters, safe_descriptors, reason: null };
 }
 
 function candidateId(lead: ProviderDiscoveryCandidate, method: HttpMethod, path: string): string {
@@ -219,20 +255,24 @@ function operationView(selected: SelectedOperation) {
   return { method: selected.method, path: selected.path, operation_id: selected.operation.operationId ?? null, summary: selected.operation.summary ?? "", score: selected.score, matched_terms: selected.matched };
 }
 
+function applySafeOverrides(inputs: RuntimeInput[], overrides: RuntimeInput): RuntimeInput[] {
+  return inputs.map(input => ({ ...structuredClone(input), ...structuredClone(overrides) }));
+}
+
 export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, options: { fetchFn?: FetchLike; verificationInputs?: RuntimeInput[]; capability?: string; family?: string } = {}): Promise<OpenApiCompileResult> {
   const fetchFn = options.fetchFn ?? fetch;
-  const response = await fetchFn(lead.spec_url, { headers: { accept: "application/json, application/yaml, text/yaml, */*", "user-agent": "MISSING-Lambda1/0.3" } });
+  const response = await fetchFn(lead.spec_url, { headers: { accept: "application/json, application/yaml, text/yaml, */*", "user-agent": "MISSING-Lambda2/0.4" } });
   if (!response.ok) throw new Error(`OpenAPI spec request failed with HTTP ${response.status}`);
   const spec = parseSpec(await response.text());
   const selected = selectOperation(spec, lead);
-  if (!selected) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: ["http_operation"], reason: "No GET or POST operation was found in the OpenAPI document" };
+  if (!selected) return { status: "unsupported", lead, operation: null, candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, safe_post_verification: null, missing: ["http_operation"], reason: "No GET or POST operation was found in the OpenAPI document" };
   if (selected.score <= 0 || selected.matched.length === 0) {
     const diagnostic = selected.method === "GET" ? "relevant_get_operation" : "relevant_post_operation";
-    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: [diagnostic], reason: `No ${selected.method} operation has semantic overlap with the unresolved demand` };
+    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, safe_post_verification: null, missing: [diagnostic], reason: `No ${selected.method} operation has semantic overlap with the unresolved demand` };
   }
 
   const base_url = baseUrlFor(spec, selected.operation);
-  if (!base_url) return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, missing: ["https_base_url"], reason: "Could not derive a static HTTPS base URL" };
+  if (!base_url) return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness: EMPTY_READINESS, safe_post_verification: null, missing: ["https_base_url"], reason: "Could not derive a static HTTPS base URL" };
 
   const credentials_required = credentialRequirements(spec, selected.pathItem, selected.operation);
   const selectedResponseSchema = responseSchema(spec, selected.operation);
@@ -254,14 +294,19 @@ export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, optio
       candidate: null,
       verification_input_evidence: [],
       provider_readiness,
+      safe_post_verification: null,
       missing,
       reason: `Relevant provider cannot enter verification yet because ${reasons.join("; ")}`,
     };
   }
 
-  const { path_bindings, query_bindings, parameters: urlParameters } = deriveBindings(spec, selected.pathItem, selected.operation);
+  const url = deriveBindings(spec, selected.pathItem, selected.operation);
+  const path_bindings = { ...url.path_bindings };
+  const query_bindings = { ...url.query_bindings };
   let body_bindings: Record<string, string> | undefined;
-  let inputParameters = [...urlParameters];
+  let inputParameters = [...url.parameters];
+  let safePost: SafePostVerificationAssessment | null = null;
+
   if (selected.method === "POST") {
     const body = deriveJsonBodyBindings(spec, selected.operation);
     if (!body.body_bindings) {
@@ -272,21 +317,37 @@ export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, optio
         candidate: null,
         verification_input_evidence: [],
         provider_readiness,
+        safe_post_verification: null,
         missing: ["json_request_body"],
         reason: body.reason,
       };
     }
-    body_bindings = body.body_bindings;
+    body_bindings = { ...body.body_bindings };
     inputParameters = [...inputParameters, ...body.parameters];
+    safePost = assessSafePostVerification({
+      base_url,
+      operation: selected.operation,
+      parameters: [...url.safe_descriptors, ...body.safe_descriptors],
+    });
+
+    for (const signal of safePost.signals) {
+      if (!signal.sufficient || !signal.input_name || typeof signal.safe_value !== "boolean" || !signal.name || !signal.location) continue;
+      if (signal.location === "query") query_bindings[signal.name] = `$input.${signal.input_name}`;
+      if (signal.location === "body") body_bindings[signal.name] = `$input.${signal.input_name}`;
+    }
+    const overrideNames = new Set(Object.keys(safePost.input_overrides));
+    inputParameters = inputParameters.filter(parameter => !overrideNames.has(parameter.input_name));
   }
 
   const { projection, required } = topLevelProjection(spec, selectedResponseSchema);
   if (!Object.keys(projection).length) {
-    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness, missing: ["object_response_projection"], reason: "The selected operation does not expose a simple top-level JSON object schema that MISSING can project deterministically" };
+    return { status: "unsupported", lead, operation: operationView(selected), candidate: null, verification_input_evidence: [], provider_readiness, safe_post_verification: safePost, missing: ["object_response_projection"], reason: "The selected operation does not expose a simple top-level JSON object schema that MISSING can project deterministically" };
   }
 
   const harvested = options.verificationInputs === undefined ? harvestVerificationInputs(inputParameters) : null;
-  const verification_inputs = options.verificationInputs ?? harvested?.inputs ?? [];
+  let verification_inputs = options.verificationInputs ?? harvested?.inputs ?? [];
+  if (safePost) verification_inputs = applySafeOverrides(verification_inputs, safePost.input_overrides);
+
   const capability = options.capability ?? `${slug(lead.normalized_intent, "discovered")}_capability`;
   const candidate: SupplyCandidate = {
     candidate_id: candidateId(lead, selected.method, selected.path), demand_intent: lead.demand_intent, capability, family: options.family ?? "discovered", provider: lead.provider,
@@ -295,7 +356,34 @@ export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, optio
     projection, required, verification_inputs,
   };
 
-  if (selected.method === "POST") {
+  if (selected.method === "POST" && safePost) {
+    if (safePost.status === "safe_for_replay") {
+      if (verification_inputs.length < 2) {
+        return {
+          status: "needs_verification_inputs",
+          lead,
+          operation: operationView(selected),
+          candidate,
+          verification_input_evidence: harvested?.evidence ?? [],
+          provider_readiness,
+          safe_post_verification: safePost,
+          missing: ["verification_inputs"],
+          reason: "POST has explicit side-effect containment evidence, but MISSING still requires two independent evidence-backed replay inputs",
+        };
+      }
+      return {
+        status: "candidate_ready_for_safe_post_replay",
+        lead,
+        operation: operationView(selected),
+        candidate,
+        verification_input_evidence: harvested?.evidence ?? [],
+        provider_readiness,
+        safe_post_verification: safePost,
+        missing: [],
+        reason: "POST has explicit side-effect containment evidence and two replay inputs; it is ready for a dedicated safe POST replay verifier, not standard Theta acquisition",
+      };
+    }
+
     const missing = ["safe_verification"];
     if (verification_inputs.length < 2) missing.push("verification_inputs");
     return {
@@ -305,10 +393,11 @@ export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, optio
       candidate,
       verification_input_evidence: harvested?.evidence ?? [],
       provider_readiness,
+      safe_post_verification: safePost,
       missing,
       reason: verification_inputs.length < 2
-        ? "POST operation compiled deterministically, but MISSING requires two evidence-backed inputs and an explicit side-effect-safe verification path before any live replay"
-        : "POST operation compiled deterministically, but MISSING will not execute or promote it until an explicit side-effect-safe verification path is approved",
+        ? `${safePost.reason}; MISSING also requires two evidence-backed inputs before any live replay`
+        : safePost.reason,
     };
   }
 
@@ -316,7 +405,7 @@ export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, optio
   if (verification_inputs.length < 2) missing.push("verification_inputs");
   return {
     status: missing.length ? "needs_verification_inputs" : "candidate_ready", lead,
-    operation: operationView(selected), candidate, verification_input_evidence: harvested?.evidence ?? [], provider_readiness, missing,
+    operation: operationView(selected), candidate, verification_input_evidence: harvested?.evidence ?? [], provider_readiness, safe_post_verification: null, missing,
     reason: missing.length ? "Theta requires two independent replay inputs grounded in explicit caller data or OpenAPI examples, enum values, or defaults; MISSING will not invent them" : null,
   };
 }
