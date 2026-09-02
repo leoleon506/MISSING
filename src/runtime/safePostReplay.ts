@@ -1,7 +1,7 @@
 import { promoteSupplyVerification, recipeFromSupplyCandidate, validateSupplyCandidateUrl, type SupplyCandidate, type SupplyVerification, type SupplyVerificationRun } from "./acquisition.js";
 import { attemptRecipe } from "./executor.js";
 import type { SafePostVerificationAssessment } from "./safePostPolicy.js";
-import type { GeneratedHeaderBinding, RuntimeInput, SafePostReplayEvidence } from "./types.js";
+import type { GeneratedHeaderBinding, SafePostReplayEvidence } from "./types.js";
 
 export function safePostReplayEnabled(): boolean {
   return process.env.MISSING_SAFE_POST_REPLAY_ENABLED === "1";
@@ -49,8 +49,12 @@ function validateSafeReplay(candidate: SupplyCandidate, assessment: SafePostVeri
 
   const sufficient = assessment.signals.filter(signal => signal.sufficient);
   if (!sufficient.length) throw new Error("Safe POST replay requires explicit side-effect containment evidence");
+  const enforceable = sufficient.filter(signal => signal.kind === "sandbox_server" || signal.kind === "dry_run_control" || signal.kind === "test_mode_control");
+  if (!enforceable.length) {
+    throw new Error("Safe POST live replay requires enforceable sandbox, dry-run, or test-mode containment; provider declaration alone is not sufficient");
+  }
 
-  for (const signal of sufficient) {
+  for (const signal of enforceable) {
     if (signal.kind === "sandbox_server" && !sandboxMarkerPresent(candidate.base_url)) {
       throw new Error("Safe POST sandbox evidence no longer matches candidate base_url");
     }
@@ -89,6 +93,7 @@ export async function verifySafePostCandidate(
   const enrichedCandidate: SupplyCandidate = {
     ...structuredClone(candidate),
     generated_headers: generatedHeaders(assessment),
+    forced_inputs: structuredClone(assessment.input_overrides),
     verification_inputs: structuredClone(candidate.verification_inputs.slice(0, 2)),
   };
   const recipe = recipeFromSupplyCandidate(enrichedCandidate, verifiedAt, replayEvidence(assessment));
