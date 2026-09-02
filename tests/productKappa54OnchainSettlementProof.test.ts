@@ -5,6 +5,7 @@ const ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 const PAY_TO = "0x209693Bc6afc0C5328bA36FaF03C514EF312287C";
 const OTHER = "0x1111111111111111111111111111111111111111";
 const TX = `0x${"a".repeat(64)}`;
+const BLOCK_HASH = `0x${"b".repeat(64)}`;
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
 function topic(address: string) {
@@ -19,6 +20,8 @@ function receipt(args: { asset?: string; recipient?: string; amount?: bigint; st
   const includeTransfer = args.includeTransfer ?? true;
   return {
     status: args.status ?? "0x1",
+    blockNumber: "0x64",
+    blockHash: BLOCK_HASH,
     logs: includeTransfer ? [{
       address: args.asset ?? ASSET,
       topics: [TRANSFER_TOPIC, topic(OTHER), topic(args.recipient ?? PAY_TO)],
@@ -33,6 +36,8 @@ function rpcFixture(chainId: string, txReceipt: unknown) {
     const body = JSON.parse(String(init?.body ?? "{}"));
     if (body.method === "eth_chainId") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: chainId }), { status: 200 });
     if (body.method === "eth_getTransactionReceipt") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: txReceipt }), { status: 200 });
+    if (body.method === "eth_blockNumber") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x64" }), { status: 200 });
+    if (body.method === "eth_getBlockByNumber") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { hash: BLOCK_HASH } }), { status: 200 });
     throw new Error(`Unexpected RPC method ${body.method}`);
   });
 }
@@ -49,6 +54,7 @@ async function prove() {
 
 afterEach(() => {
   delete process.env.MISSING_X402_RPC_URL;
+  delete process.env.MISSING_X402_MIN_CONFIRMATIONS;
   configureX402RpcFetch();
 });
 
@@ -57,8 +63,16 @@ describe("Product Kappa.5.4 exact on-chain x402 settlement proof", () => {
     process.env.MISSING_X402_RPC_URL = "https://rpc.test";
     const rpc = rpcFixture("0x14a34", receipt());
     configureX402RpcFetch(rpc as typeof fetch);
-    await expect(prove()).resolves.toEqual({ state: "verified", chain_id: "84532", transfer_log_index: 0 });
-    expect(rpc).toHaveBeenCalledTimes(2);
+    await expect(prove()).resolves.toMatchObject({
+      state: "verified",
+      chain_id: "84532",
+      transfer_log_index: 0,
+      block_number: "0x64",
+      block_hash: BLOCK_HASH,
+      confirmations: 1,
+      required_confirmations: 1,
+    });
+    expect(rpc).toHaveBeenCalledTimes(5);
   });
 
   it("fails closed on network mismatch", async () => {
