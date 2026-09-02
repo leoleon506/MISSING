@@ -18,6 +18,7 @@ import { safePostReplayEnabled } from "../runtime/safePostReplay.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
 import { settledReorgMonitorSnapshot, startSettledX402ReorgMonitor, stopSettledX402ReorgMonitor } from "../runtime/settledReorgMonitor.js";
 import { supplyLedgerPath } from "../runtime/supplyLedger.js";
+import { productionAdmissionSnapshot } from "../runtime/x402.js";
 import { createProductServer } from "./server.js";
 
 export const productMcpHandler = createMcpHandler(() => createProductServer());
@@ -44,6 +45,7 @@ export function healthPayload() {
     economics_enforcement_enabled: economicsEnforcementEnabled(),
     economics_persistence: economicsLedgerPath() !== null,
     agent_payments: agentPaymentsSnapshot(),
+    production_admission: productionAdmissionSnapshot(),
     settled_reorg_monitor: settledReorgMonitorSnapshot(),
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
@@ -68,8 +70,10 @@ export function readinessPayload(baseUrl: string) {
   const agentrank_persistence = agentRankLedgerPath() !== null;
   const economics_persistence = economicsLedgerPath() !== null;
   const distributedReady = !distributedMoneyEnabled() || agentPaymentsSnapshot().distributed_money.ready;
+  const production_admission = productionAdmissionSnapshot();
+  const productionAdmissionReady = !production_admission.enabled || production_admission.ready;
   return {
-    status: public_url_valid && demand_persistence && supply_persistence && agentrank_persistence && distributedReady ? "ready" : "not_ready",
+    status: public_url_valid && demand_persistence && supply_persistence && agentrank_persistence && distributedReady && productionAdmissionReady ? "ready" : "not_ready",
     public_url_valid,
     demand_persistence,
     supply_persistence,
@@ -79,6 +83,7 @@ export function readinessPayload(baseUrl: string) {
     economics_enforcement_enabled: economicsEnforcementEnabled(),
     economics_persistence,
     agent_payments: agentPaymentsSnapshot(),
+    production_admission,
     settled_reorg_monitor: settledReorgMonitorSnapshot(),
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
