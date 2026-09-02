@@ -73,6 +73,8 @@ export interface VerifiedRecipe {
   credential_bindings?: CredentialBinding[];
   /** Non-secret per-request headers such as Idempotency-Key. */
   generated_headers?: GeneratedHeaderBinding[];
+  /** Values that callers cannot override. Used to preserve verified safe-mode controls. */
+  forced_inputs?: RuntimeInput;
   projection: Record<string, ProjectionRule>;
   required: string[];
   example_input: RuntimeInput;
