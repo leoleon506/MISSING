@@ -1,0 +1,52 @@
+name: Kappa.5.9 Production End-to-End Recovery
+
+on:
+  push:
+    branches:
+      - product-kappa59-production-recovery-orchestrator
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  production-recovery:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: missing
+          POSTGRES_PASSWORD: missing
+          POSTGRES_DB: missing_kappa59
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U missing -d missing_kappa59"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Focused Kappa.5.9 unit tests
+        run: npx vitest run tests/productKappa59ProductionRecovery.test.ts
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Run Kappa.5.9 production crash recovery proof
+        env:
+          MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_kappa59?sslmode=disable
+          MISSING_POSTGRES_SSLMODE: disable
+        run: npx tsx src/experimentKappa59.ts
+      - name: Verify Kappa.5.9 evidence exists
+        run: test -s artifacts/product-kappa59-production-recovery.json
+      - name: Upload Kappa.5.9 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-kappa59-production-recovery
+          path: artifacts/product-kappa59-production-recovery.json
