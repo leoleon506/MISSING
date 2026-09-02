@@ -1,6 +1,7 @@
 import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, type SupplyOpportunity } from "./acquisition.js";
 import { compileOpenApiLead, type OpenApiCompileResult } from "./openApiCompiler.js";
 import { discoverProviderCandidates, type ProviderDiscoveryCandidate } from "./providerDiscovery.js";
+import { acquireSafePostCandidate, safePostReplayEnabled } from "./safePostReplay.js";
 import { isSupplyIntentBlocked, recordSupplyBlock } from "./supplyBlockLedger.js";
 
 export type Theta4Status = "promoted" | "rejected" | "needs_evidence" | "needs_safe_verification" | "candidate_ready_for_safe_post_replay" | "needs_provider_setup" | "no_candidates";
@@ -29,6 +30,7 @@ export function thetaOrchestratorEnabled(): boolean {
 type DiscoverFn = (opportunity: SupplyOpportunity, options?: { limit?: number; directoryUrl?: string }) => Promise<ProviderDiscoveryCandidate[]>;
 type CompileFn = (lead: ProviderDiscoveryCandidate) => Promise<OpenApiCompileResult>;
 type AcquireFn = typeof acquireVerifiedSupplyCandidate;
+type SafePostAcquireFn = typeof acquireSafePostCandidate;
 
 export async function runThetaOrchestrator(options: {
   candidateLimit?: number;
@@ -37,6 +39,7 @@ export async function runThetaOrchestrator(options: {
   discoverFn?: DiscoverFn;
   compileFn?: CompileFn;
   acquireFn?: AcquireFn;
+  safePostAcquireFn?: SafePostAcquireFn;
 } = {}): Promise<Theta4Result> {
   const ranked = rankSupplyOpportunities(50);
   const opportunity = ranked.find(item => !isSupplyIntentBlocked(item.normalized_intent)) ?? null;
@@ -64,6 +67,7 @@ export async function runThetaOrchestrator(options: {
 
   const compileFn = options.compileFn ?? (lead => compileOpenApiLead(lead));
   const acquireFn = options.acquireFn ?? acquireVerifiedSupplyCandidate;
+  const safePostAcquireFn = options.safePostAcquireFn ?? acquireSafePostCandidate;
   let sawNeedsEvidence = false;
   let safeVerificationReason: string | null = null;
   let safeVerificationLead: ProviderDiscoveryCandidate | null = null;
@@ -100,14 +104,47 @@ export async function runThetaOrchestrator(options: {
       continue;
     }
     if (compiled.status === "candidate_ready_for_safe_post_replay") {
-      return {
-        status: "candidate_ready_for_safe_post_replay",
-        opportunity,
-        selected_provider: lead.provider,
-        recipe_fingerprint: null,
-        trace,
-        reason: compiled.reason ?? "POST candidate passed the safe replay policy and awaits the dedicated safe POST verifier",
-      };
+      if (!compiled.candidate || !compiled.safe_post_verification) {
+        lastRejection = "Safe POST compiler result is missing candidate or policy evidence";
+        continue;
+      }
+      if (!safePostReplayEnabled()) {
+        return {
+          status: "candidate_ready_for_safe_post_replay",
+          opportunity,
+          selected_provider: lead.provider,
+          recipe_fingerprint: null,
+          trace,
+          reason: compiled.reason ?? "POST candidate passed the safe replay policy; enable the trusted Lambda.3 verifier to continue",
+        };
+      }
+      try {
+        const acquisition = await safePostAcquireFn(compiled.candidate, compiled.safe_post_verification, { timeoutMs: options.timeoutMs });
+        trace.push({
+          stage: "verify_promote",
+          status: `safe_post_${acquisition.status}`,
+          provider: lead.provider,
+          candidate_id: compiled.candidate.candidate_id,
+          detail: acquisition.verification.reason ?? acquisition.promotion.reason ?? undefined,
+        });
+        if (acquisition.status === "promoted" || acquisition.status === "already_registered") {
+          return {
+            status: "promoted",
+            opportunity,
+            selected_provider: lead.provider,
+            recipe_fingerprint: acquisition.verification.recipe_fingerprint,
+            trace,
+            reason: acquisition.status === "already_registered" ? "Safe POST recipe was already registered" : null,
+          };
+        }
+        lastRejection = acquisition.verification.reason ?? acquisition.promotion.reason ?? "Safe POST replay rejected the candidate";
+        continue;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        trace.push({ stage: "verify_promote", status: "safe_post_error", provider: lead.provider, candidate_id: compiled.candidate.candidate_id, detail });
+        lastRejection = detail;
+        continue;
+      }
     }
     if (compiled.status === "needs_safe_verification") {
       if (!safeVerificationReason) {
