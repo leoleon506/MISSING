@@ -3,20 +3,30 @@ on:
   push:
     branches: [product-kappa56-native-postgres-pooling]
 
+permissions:
+  contents: write
+
 jobs:
   lock-bootstrap:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: product-kappa56-native-postgres-pooling
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - name: Generate package lock
         run: npm install --package-lock-only --ignore-scripts
-      - name: Upload package lock
-        uses: actions/upload-artifact@v4
-        with:
-          name: kappa56-package-lock
-          path: package-lock.json
-          if-no-files-found: error
+      - name: Commit package lock if changed
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json already synchronized"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "Update Kappa.5.6 package lock"
+          git push origin HEAD:product-kappa56-native-postgres-pooling
