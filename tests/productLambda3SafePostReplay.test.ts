@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { SupplyCandidate } from "../src/runtime/acquisition.js";
+import { recipeFromSupplyCandidate, type SupplyCandidate } from "../src/runtime/acquisition.js";
 import { resetDemand, recordDemand } from "../src/runtime/discovery.js";
 import { resetRuntimeHealth, resolveCapability } from "../src/runtime/executor.js";
 import type { OpenApiCompileResult } from "../src/runtime/openApiCompiler.js";
@@ -248,6 +248,7 @@ describe("Product Lambda.3 dedicated safe POST replay", () => {
       missing: [],
       reason: "ready",
     };
+    const mockRecipe = recipeFromSupplyCandidate(c, "2026-09-02T00:00:00.000Z");
     let standardCalls = 0;
     let safeCalls = 0;
 
@@ -265,21 +266,21 @@ describe("Product Lambda.3 dedicated safe POST replay", () => {
           verification: {
             candidate_id: c.candidate_id,
             status: "verified" as const,
-            recipe_fingerprint: "lambda3-safe-fingerprint",
+            recipe_fingerprint: mockRecipe.recipe_fingerprint,
             capability: c.capability,
             provider: c.provider,
             verified_at: "2026-09-02T00:00:00.000Z",
             runs: [],
             reason: null,
-            recipe: null,
+            recipe: mockRecipe,
           },
-          promotion: { promoted: true, reason: null, recipe: null },
+          promotion: { promoted: true, reason: null, recipe: mockRecipe },
         };
       },
     });
 
     expect(result.status).toBe("promoted");
-    expect(result.recipe_fingerprint).toBe("lambda3-safe-fingerprint");
+    expect(result.recipe_fingerprint).toBe(mockRecipe.recipe_fingerprint);
     expect(safeCalls).toBe(1);
     expect(standardCalls).toBe(0);
     expect(result.trace.some(step => step.status === "safe_post_promoted")).toBe(true);
