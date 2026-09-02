@@ -16,6 +16,7 @@ import { providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { safePostReplayEnabled } from "../runtime/safePostReplay.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
+import { settledReorgMonitorSnapshot, startSettledX402ReorgMonitor, stopSettledX402ReorgMonitor } from "../runtime/settledReorgMonitor.js";
 import { supplyLedgerPath } from "../runtime/supplyLedger.js";
 import { createProductServer } from "./server.js";
 
@@ -43,6 +44,7 @@ export function healthPayload() {
     economics_enforcement_enabled: economicsEnforcementEnabled(),
     economics_persistence: economicsLedgerPath() !== null,
     agent_payments: agentPaymentsSnapshot(),
+    settled_reorg_monitor: settledReorgMonitorSnapshot(),
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
@@ -77,6 +79,7 @@ export function readinessPayload(baseUrl: string) {
     economics_enforcement_enabled: economicsEnforcementEnabled(),
     economics_persistence,
     agent_payments: agentPaymentsSnapshot(),
+    settled_reorg_monitor: settledReorgMonitorSnapshot(),
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
@@ -175,10 +178,12 @@ export async function serveHttp() {
   const host = process.env.HOST ?? "127.0.0.1";
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Invalid PORT: ${process.env.PORT}`);
   if (distributedMoneyEnabled()) await initializeDistributedMoney();
+  startSettledX402ReorgMonitor();
   const resolvedPublicBaseUrl = publicBaseUrl(port, host);
   const server = createServer(createProductHttpApp(resolvedPublicBaseUrl));
 
   const close = async () => {
+    await stopSettledX402ReorgMonitor();
     await productMcpHandler.close();
     server.close();
   };
