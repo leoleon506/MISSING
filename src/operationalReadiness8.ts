@@ -95,13 +95,16 @@ async function main() {
   const proofStormSize = 60;
   const stormResults = await Promise.all(Array.from({ length: proofStormSize }, (_, index) => proof(index + 1)));
   const callsAfterStorm = externalCalls;
+  const stormMethodCalls = { ...methodCalls };
+  const stormChainIdCalls = stormMethodCalls.eth_chainId ?? 0;
+  const stormReceiptCalls = stormMethodCalls.eth_getTransactionReceipt ?? 0;
   const stormSnapshot = dependencyBackpressureSnapshot() as any;
   const rpcStateAfterStorm = stormSnapshot.dependencies.rpc;
   const unavailableDuringStorm = stormResults.filter(result => result.state === "unavailable").length;
   const stormPass =
     callsAfterStorm <= 8
-    && (methodCalls.eth_chainId ?? 0) <= 4
-    && (methodCalls.eth_getTransactionReceipt ?? 0) <= 4
+    && stormChainIdCalls <= 4
+    && stormReceiptCalls <= 4
     && rpcStateAfterStorm.rejectedSaturated >= proofStormSize - 4
     && unavailableDuringStorm === proofStormSize;
 
@@ -152,8 +155,8 @@ async function main() {
         details: {
           proof_requests: proofStormSize,
           external_calls: callsAfterStorm,
-          chain_id_calls: methodCalls.eth_chainId ?? 0,
-          receipt_calls: methodCalls.eth_getTransactionReceipt ?? 0,
+          chain_id_calls: stormChainIdCalls,
+          receipt_calls: stormReceiptCalls,
           rejected_saturated: rpcStateAfterStorm.rejectedSaturated,
           max_in_flight: rpcStateAfterStorm.max_in_flight,
           unavailable_results: unavailableDuringStorm,
