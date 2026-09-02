@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { configureAgentRankLedger, resetAgentRankForTest } from "../src/runtime/agentRank.js";
 import { handleAgentPaidResolution } from "../src/runtime/agentPayments.js";
@@ -9,6 +10,7 @@ import { configureEconomicsLedger } from "../src/runtime/economics.js";
 import { resetRuntimeHealth } from "../src/runtime/executor.js";
 import { configureProviderCostLedger, truncateProviderCostLedger } from "../src/runtime/providerCostLedger.js";
 import { recipesForCapability } from "../src/runtime/recipes.js";
+import { agentRequestHash } from "../src/runtime/requestBinding.js";
 import {
   configureTransactionalMoney,
   reserveTransactionalPayment,
@@ -94,7 +96,7 @@ afterEach(() => {
 });
 
 describe("Product Kappa.5 transactional money core", () => {
-  it("returns the persisted successful response on retry without re-verifying or re-executing", async () => {
+  it("returns cache only for the exact bound request and rejects changed input before facilitator/provider", async () => {
     setup();
     const facilitator = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
@@ -123,15 +125,25 @@ describe("Product Kappa.5 transactional money core", () => {
     expect(first.status).toBe(200);
     expect(facilitator).toHaveBeenCalledTimes(2);
     expect(provider).toHaveBeenCalledTimes(1);
-    expect(transactionalMoneySnapshot()).toMatchObject({ payments: 1, settled: 1, settling: 0 });
+    expect(transactionalMoneySnapshot()).toMatchObject({ payments: 1, request_bound: 1, legacy_unbound: 0, settled: 1, settling: 0 });
 
     const second = await handleAgentPaidResolution(args);
     expect(second).toEqual(first);
     expect(facilitator).toHaveBeenCalledTimes(2);
     expect(provider).toHaveBeenCalledTimes(1);
+
+    const changed = await handleAgentPaidResolution({
+      ...args,
+      request: { capability: "country_alpha_metadata", input: { country_code: "US" } },
+    });
+    expect(changed.status).toBe(409);
+    expect(changed.body).toMatchObject({ error: "payment_request_mismatch", prior_state: "settled", payment_settled: true });
+    expect(JSON.stringify(changed.body)).not.toContain("New Zealand");
+    expect(facilitator).toHaveBeenCalledTimes(2);
+    expect(provider).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves ambiguous settlement in settling and blocks retry before facilitator/provider", async () => {
+  it("leaves ambiguous settlement in settling and blocks matching retry before facilitator/provider", async () => {
     setup();
     const facilitator = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
@@ -152,7 +164,7 @@ describe("Product Kappa.5 transactional money core", () => {
     const first = await handleAgentPaidResolution(args);
     expect(first.status).toBe(503);
     expect(first.body).toMatchObject({ error: "payment_settlement_reconciliation_required" });
-    expect(transactionalMoneySnapshot()).toMatchObject({ payments: 1, settling: 1, settled: 0 });
+    expect(transactionalMoneySnapshot()).toMatchObject({ payments: 1, request_bound: 1, settling: 1, settled: 0 });
     expect(facilitator).toHaveBeenCalledTimes(2);
     expect(provider).toHaveBeenCalledTimes(1);
 
@@ -163,13 +175,82 @@ describe("Product Kappa.5 transactional money core", () => {
     expect(provider).toHaveBeenCalledTimes(1);
   });
 
-  it("enforces one database reservation per payment hash", () => {
+  it("enforces one database reservation per payment hash while preserving the winning request binding", () => {
     setup();
     const hash = createHash("sha256").update(paymentSignature(), "utf8").digest("hex");
-    const first = reserveTransactionalPayment({ paymentHash: hash, executionId: "execution-a", capability: "country_alpha_metadata" });
-    const second = reserveTransactionalPayment({ paymentHash: hash, executionId: "execution-b", capability: "country_alpha_metadata" });
+    const requestHashA = agentRequestHash("country_alpha_metadata", { country_code: "NZ" });
+    const requestHashB = agentRequestHash("country_alpha_metadata", { country_code: "US" });
+    const first = reserveTransactionalPayment({ paymentHash: hash, requestHash: requestHashA, executionId: "execution-a", capability: "country_alpha_metadata" });
+    const second = reserveTransactionalPayment({ paymentHash: hash, requestHash: requestHashB, executionId: "execution-b", capability: "country_alpha_metadata" });
     expect(first.reserved).toBe(true);
     expect(second.reserved).toBe(false);
     expect(transactionalPayment(hash)?.execution_id).toBe("execution-a");
+    expect(transactionalPayment(hash)?.request_hash).toBe(requestHashA);
+  });
+
+  it("migrates legacy SQLite rows but fails them closed because no request binding exists", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "missing-kappa5-legacy-"));
+    const path = join(tempDir, "money.sqlite");
+    const signature = paymentSignature();
+    const hash = createHash("sha256").update(signature, "utf8").digest("hex");
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`
+      CREATE TABLE x402_payments (
+        payment_hash TEXT PRIMARY KEY,
+        execution_id TEXT NOT NULL UNIQUE,
+        capability TEXT NOT NULL,
+        state TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        reason TEXT,
+        transaction_reference TEXT,
+        response_status INTEGER,
+        response_headers_json TEXT,
+        response_body_json TEXT,
+        customer_price_microusd INTEGER,
+        provider_cost_microusd INTEGER,
+        gross_margin_microusd INTEGER
+      );
+    `);
+    legacy.prepare(`INSERT INTO x402_payments(payment_hash,execution_id,capability,state,created_at,updated_at,transaction_reference,response_status,response_body_json) VALUES (?,?,?,'settled',?,?,?,?,?)`).run(
+      hash, "legacy-execution", "country_alpha_metadata", new Date().toISOString(), new Date().toISOString(), "0xlegacy", 200,
+      JSON.stringify({ status: "resolved", resolution: { output: { country_name: "New Zealand" } } }),
+    );
+    legacy.close();
+
+    process.env.MISSING_AGENT_PAYMENTS_ENABLED = "1";
+    process.env.MISSING_X402_ENABLED = "1";
+    process.env.MISSING_X402_NETWORK = "eip155:84532";
+    process.env.MISSING_X402_ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+    process.env.MISSING_X402_PAY_TO = "0x209693Bc6afc0C5328bA36FaF03C514EF312287C";
+    process.env.MISSING_X402_FACILITATOR_URL = "https://facilitator.test";
+    process.env.MISSING_TRANSACTIONAL_MONEY_ENABLED = "1";
+    process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED = "1";
+    const recipes = recipesForCapability("country_alpha_metadata");
+    const warnely = recipes.find(recipe => recipe.provider === "Warnely")!;
+    const countries = recipes.find(recipe => recipe.provider === "countries.dev")!;
+    process.env.MISSING_ECONOMICS_JSON = JSON.stringify({ recipes: {
+      [warnely.recipe_fingerprint]: { provider_cost_microusd: 1000, customer_price_microusd: 5000 },
+      [countries.recipe_fingerprint]: { provider_cost_microusd: 3000, customer_price_microusd: 5000 },
+    } });
+    configureTransactionalMoney(path);
+
+    const facilitator = vi.fn();
+    const provider = vi.fn();
+    configureX402Fetch(facilitator as typeof fetch);
+    vi.stubGlobal("fetch", provider);
+
+    const result = await handleAgentPaidResolution({
+      request: { capability: "country_alpha_metadata", input: { country_code: "NZ" } },
+      paymentSignature: signature,
+      resourceUrl: "https://missing.test/v1/agent/resolve",
+    });
+    expect(result.status).toBe(409);
+    expect(result.body).toMatchObject({ error: "payment_request_binding_unavailable", prior_state: "settled" });
+    expect(JSON.stringify(result.body)).not.toContain("New Zealand");
+    expect(transactionalPayment(hash)?.request_hash).toBeNull();
+    expect(transactionalMoneySnapshot()).toMatchObject({ payments: 1, request_bound: 0, legacy_unbound: 1 });
+    expect(facilitator).not.toHaveBeenCalled();
+    expect(provider).not.toHaveBeenCalled();
   });
 });

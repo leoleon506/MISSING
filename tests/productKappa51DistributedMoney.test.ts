@@ -11,6 +11,7 @@ import {
   settleDistributedPayment,
   truncateDistributedMoney,
 } from "../src/runtime/distributedMoney.js";
+import { agentRequestHash } from "../src/runtime/requestBinding.js";
 
 type Row = Record<string, any>;
 
@@ -23,7 +24,12 @@ function fakePostgres() {
       if (sql.includes("COUNT(*)::bigint AS payments")) {
         const all = [...rows.values()];
         const count = (state: string) => all.filter(row => row.state === state).length;
-        return { stdout: JSON.stringify({ payments: all.length, reserved: count("reserved"), settling: count("settling"), settled: count("settled"), failed: count("failed") }) + "\n", stderr: "" };
+        return { stdout: JSON.stringify({
+          payments: all.length,
+          request_bound: all.filter(row => row.request_hash != null).length,
+          legacy_unbound: all.filter(row => row.request_hash == null).length,
+          reserved: count("reserved"), settling: count("settling"), settled: count("settled"), failed: count("failed"),
+        }) + "\n", stderr: "" };
       }
       if (sql.startsWith("DELETE FROM")) {
         rows.clear();
@@ -38,6 +44,7 @@ function fakePostgres() {
         const now = new Date().toISOString();
         const row: Row = {
           payment_hash: vars.payment_hash,
+          request_hash: vars.request_hash,
           execution_id: vars.execution_id,
           capability: vars.capability,
           state: "reserved",
@@ -101,30 +108,34 @@ afterEach(() => {
 });
 
 describe("Product Kappa.5.1 distributed money", () => {
-  it("allows only one reservation for a payment hash across callers", async () => {
+  it("allows only one reservation for a payment hash and preserves the winner request binding", async () => {
     process.env.MISSING_DISTRIBUTED_MONEY_ENABLED = "1";
     const fake = fakePostgres();
     configureDistributedMoneyExecForTest(fake.exec);
     await initializeDistributedMoney();
+    const nz = agentRequestHash("country_alpha_metadata", { country_code: "NZ" });
+    const us = agentRequestHash("country_alpha_metadata", { country_code: "US" });
 
-    const first = await reserveDistributedPayment({ paymentHash: "same-payment", executionId: "exec-a", capability: "country_alpha_metadata" });
-    const second = await reserveDistributedPayment({ paymentHash: "same-payment", executionId: "exec-b", capability: "country_alpha_metadata" });
+    const first = await reserveDistributedPayment({ paymentHash: "same-payment", requestHash: nz, executionId: "exec-a", capability: "country_alpha_metadata" });
+    const second = await reserveDistributedPayment({ paymentHash: "same-payment", requestHash: us, executionId: "exec-b", capability: "country_alpha_metadata" });
 
     expect(first.reserved).toBe(true);
     expect(second.reserved).toBe(false);
     expect(second.prior?.execution_id).toBe("exec-a");
+    expect(second.prior?.request_hash).toBe(nz);
     expect((await distributedPayment("same-payment"))?.execution_id).toBe("exec-a");
-    expect(distributedMoneySnapshot()).toMatchObject({ ready: true, payments: 1, reserved: 1 });
+    expect(distributedMoneySnapshot()).toMatchObject({ ready: true, payments: 1, request_bound: 1, legacy_unbound: 0, reserved: 1 });
   });
 
-  it("persists settling economics, pending transaction and cached settled response", async () => {
+  it("persists request binding with settling economics, pending transaction and cached settled response", async () => {
     process.env.MISSING_DISTRIBUTED_MONEY_ENABLED = "1";
     process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED = "1";
     const fake = fakePostgres();
     configureDistributedMoneyExecForTest(fake.exec);
     await initializeDistributedMoney();
     await truncateDistributedMoney();
-    await reserveDistributedPayment({ paymentHash: "p1", executionId: "e1", capability: "country_alpha_metadata" });
+    const requestHash = agentRequestHash("country_alpha_metadata", { country_code: "NZ" });
+    await reserveDistributedPayment({ paymentHash: "p1", requestHash, executionId: "e1", capability: "country_alpha_metadata" });
 
     const settling = await markDistributedPaymentSettling({
       paymentHash: "p1",
@@ -138,6 +149,7 @@ describe("Product Kappa.5.1 distributed money", () => {
       network: "eip155:84532",
     });
     expect(settling.changed).toBe(true);
+    expect(settling.record?.request_hash).toBe(requestHash);
 
     const pending = await markDistributedSettlementPending({ paymentHash: "p1", executionId: "e1", transactionReference: "0xtx", reason: "settlement_pending" });
     expect(pending.record?.state).toBe("settling");
@@ -152,7 +164,8 @@ describe("Product Kappa.5.1 distributed money", () => {
       responseBody: { status: "resolved" },
     });
     expect(committed.changed).toBe(true);
+    expect(committed.record?.request_hash).toBe(requestHash);
     expect(cachedDistributedResponse(committed.record!)).toEqual({ status: 200, headers: { "PAYMENT-RESPONSE": "ok" }, body: { status: "resolved" } });
-    expect(distributedMoneySnapshot()).toMatchObject({ payments: 1, settling: 0, settled: 1 });
+    expect(distributedMoneySnapshot()).toMatchObject({ payments: 1, request_bound: 1, legacy_unbound: 0, settling: 0, settled: 1 });
   });
 });

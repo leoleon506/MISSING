@@ -16,6 +16,7 @@ import { recipeEconomics } from "./economics.js";
 import { resolveCapability } from "./executor.js";
 import { providerCostForExecution, providerCostSnapshot } from "./providerCostLedger.js";
 import { VERIFIED_RECIPES } from "./recipes.js";
+import { agentRequestHash, requestBindingStatus } from "./requestBinding.js";
 import {
   cachedTransactionalResponse,
   failTransactionalPayment,
@@ -25,6 +26,7 @@ import {
   transactionalMoneyEnabled,
   transactionalMoneySnapshot,
   transactionalPayment,
+  type TransactionalPaymentRecord,
 } from "./transactionalMoney.js";
 import type { RuntimeInput } from "./types.js";
 import {
@@ -65,10 +67,27 @@ export interface AgentPaymentHttpResult {
   body: unknown;
 }
 
-function priorSqliteResult(paymentKey: string): AgentPaymentHttpResult | null {
+function bindingFailure(record: Pick<TransactionalPaymentRecord, "request_hash" | "state" | "transaction_reference">, currentRequestHash: string): AgentPaymentHttpResult | null {
+  const status = requestBindingStatus(record.request_hash, currentRequestHash);
+  if (status === "match") return null;
+  return {
+    status: 409,
+    headers: { "Cache-Control": "no-store" },
+    body: {
+      error: status === "mismatch" ? "payment_request_mismatch" : "payment_request_binding_unavailable",
+      prior_state: record.state,
+      payment_settled: record.state === "settled",
+      transaction: record.transaction_reference ?? undefined,
+    },
+  };
+}
+
+function priorSqliteResult(paymentKey: string, currentRequestHash: string): AgentPaymentHttpResult | null {
   if (!transactionalMoneyEnabled() || distributedMoneyEnabled()) return null;
   const prior = transactionalPayment(paymentKey);
   if (!prior) return null;
+  const binding = bindingFailure(prior, currentRequestHash);
+  if (binding) return binding;
   const cached = cachedTransactionalResponse(prior);
   if (cached) return cached;
   return {
@@ -111,10 +130,12 @@ function distributedResponse(record: DistributedPaymentRecord) {
   }
 }
 
-async function priorDistributedResult(paymentKey: string): Promise<AgentPaymentHttpResult | null> {
+async function priorDistributedResult(paymentKey: string, currentRequestHash: string): Promise<AgentPaymentHttpResult | null> {
   if (!distributedMoneyEnabled()) return null;
   const prior = await distributedPayment(paymentKey);
   if (!prior) return null;
+  const binding = bindingFailure(prior, currentRequestHash);
+  if (binding) return binding;
   const cached = cachedDistributedResponse(prior);
   if (cached) return cached;
 
@@ -134,6 +155,8 @@ async function priorDistributedResult(paymentKey: string): Promise<AgentPaymentH
       if (!committed.changed) {
         const latest = await distributedPayment(paymentKey);
         if (latest) {
+          const latestBinding = bindingFailure(latest, currentRequestHash);
+          if (latestBinding) return latestBinding;
           const recovered = cachedDistributedResponse(latest);
           if (recovered) return recovered;
         }
@@ -192,6 +215,13 @@ export async function handleAgentPaidResolution(args: {
     return { status: 400, body: { error: "invalid_request", required: { capability: "string", input: "object" } } };
   }
 
+  let requestHash: string;
+  try {
+    requestHash = agentRequestHash(args.request.capability, args.request.input);
+  } catch (error) {
+    return { status: 400, body: { error: "invalid_request", reason: error instanceof Error ? error.message : String(error) } };
+  }
+
   const quote = quoteCapability(args.request.capability);
   if (quote.status !== "quoted") return { status: 404, body: quote };
   const paymentRequired = x402PaymentRequired({ resourceUrl: args.resourceUrl, capability: args.request.capability, customerPriceMicrousd: quote.customer_price_microusd });
@@ -203,9 +233,9 @@ export async function handleAgentPaidResolution(args: {
   }
 
   const paymentKey = signatureHash(args.paymentSignature);
-  const priorDistributed = await priorDistributedResult(paymentKey);
+  const priorDistributed = await priorDistributedResult(paymentKey, requestHash);
   if (priorDistributed) return priorDistributed;
-  const priorSqlite = priorSqliteResult(paymentKey);
+  const priorSqlite = priorSqliteResult(paymentKey, requestHash);
   if (priorSqlite) return priorSqlite;
   if (inFlightPayments.has(paymentKey)) return { status: 409, body: { error: "payment_in_progress" } };
   inFlightPayments.add(paymentKey);
@@ -223,11 +253,11 @@ export async function handleAgentPaidResolution(args: {
 
     const executionId = randomUUID();
     if (distributedMoneyEnabled()) {
-      const reservation = await reserveDistributedPayment({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability });
-      if (!reservation.reserved) return await priorDistributedResult(verified.paymentHash) ?? { status: 409, body: { error: "payment_already_used" } };
+      const reservation = await reserveDistributedPayment({ paymentHash: verified.paymentHash, requestHash, executionId, capability: args.request.capability });
+      if (!reservation.reserved) return await priorDistributedResult(verified.paymentHash, requestHash) ?? { status: 409, body: { error: "payment_already_used" } };
     } else if (transactionalMoneyEnabled()) {
-      const reservation = reserveTransactionalPayment({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability });
-      if (!reservation.reserved) return priorSqliteResult(verified.paymentHash) ?? { status: 409, body: { error: "payment_already_used" } };
+      const reservation = reserveTransactionalPayment({ paymentHash: verified.paymentHash, requestHash, executionId, capability: args.request.capability });
+      if (!reservation.reserved) return priorSqliteResult(verified.paymentHash, requestHash) ?? { status: 409, body: { error: "payment_already_used" } };
     } else {
       const guard = reserveX402Payment({ paymentHash: verified.paymentHash, executionId, capability: args.request.capability });
       if (!guard.reserved) return { status: 409, body: { error: guard.prior?.state === "settled" ? "payment_already_settled" : "payment_already_used", prior_state: guard.prior?.state ?? "in_progress", payment_settled: guard.prior?.state === "settled", transaction: guard.prior?.transaction_reference ?? undefined } };
