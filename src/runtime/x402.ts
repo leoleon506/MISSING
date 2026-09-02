@@ -157,7 +157,10 @@ export async function verifyX402Payment(args: { paymentSignature: string; requir
 
 export async function settleX402Payment(args: { paymentPayload: unknown; requirements: X402Requirements; settlementIntentId?: string | null }): Promise<X402Settlement> {
   const intent = args.settlementIntentId?.trim() || null;
-  const idempotent = Boolean(intent && x402FacilitatorIdempotencyEnabled());
+  if (intent && !x402FacilitatorIdempotencyEnabled()) {
+    throw new Error("x402 facilitator settlement idempotency contract is not enabled");
+  }
+  const idempotent = Boolean(intent);
   const result = await facilitatorPost("settle", {
     x402Version: 2,
     paymentPayload: args.paymentPayload,
