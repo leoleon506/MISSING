@@ -118,10 +118,10 @@ function paymentHash(header: string): string {
   return createHash("sha256").update(header, "utf8").digest("hex");
 }
 
-async function facilitatorPost(path: "verify" | "settle", body: unknown): Promise<any> {
+async function facilitatorPost(path: "verify" | "settle", body: unknown, extraHeaders: Record<string, string> = {}): Promise<any> {
   const c = x402Config();
   if (!c.facilitatorUrl) throw new Error("x402 facilitator is not configured");
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...extraHeaders };
   if (c.facilitatorBearer) headers.Authorization = `Bearer ${c.facilitatorBearer}`;
   const response = await facilitatorFetch(`${c.facilitatorUrl.replace(/\/$/, "")}/${path}`, {
     method: "POST",
@@ -145,12 +145,14 @@ export async function verifyX402Payment(args: { paymentSignature: string; requir
     : { valid: false as const, reason: typeof result?.invalidReason === "string" ? result.invalidReason : "payment_not_valid" };
 }
 
-export async function settleX402Payment(args: { paymentPayload: unknown; requirements: X402Requirements }): Promise<X402Settlement> {
+export async function settleX402Payment(args: { paymentPayload: unknown; requirements: X402Requirements; settlementIntentId?: string | null }): Promise<X402Settlement> {
+  const intent = args.settlementIntentId?.trim() || null;
   const result = await facilitatorPost("settle", {
     x402Version: 2,
     paymentPayload: args.paymentPayload,
     paymentRequirements: args.requirements,
-  });
+    ...(intent ? { extensions: { missingSettlementIntentId: intent } } : {}),
+  }, intent ? { "Idempotency-Key": intent, "X-MISSING-Settlement-Intent": intent } : {});
   return {
     success: result?.success === true,
     payer: typeof result?.payer === "string" ? result.payer : undefined,

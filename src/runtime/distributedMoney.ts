@@ -1,11 +1,21 @@
 import { Pool, type PoolConfig, type QueryResultRow } from "pg";
 import type { TransactionalPaymentRecord } from "./transactionalMoney.js";
 
-export interface DistributedPaymentRecord extends TransactionalPaymentRecord {
+export type DistributedPaymentState = "reserved" | "executing" | "provider_done" | "settling" | "settled" | "ambiguous" | "failed";
+export type ProviderRecoveryMode = "read_only" | "idempotent" | "ambiguous";
+
+export interface DistributedPaymentRecord extends Omit<TransactionalPaymentRecord, "state"> {
+  state: DistributedPaymentState;
   provider_attempts: number | null;
   unknown_provider_cost_attempts: number | null;
   resolution_json: string | null;
   network: string | null;
+  provider_recipe_fingerprint: string | null;
+  provider_recovery_mode: ProviderRecoveryMode | null;
+  provider_idempotency_key: string | null;
+  settlement_intent_id: string | null;
+  lease_token: string | null;
+  lease_expires_at: string | null;
 }
 
 type ExecResult = { stdout: string; stderr: string };
@@ -26,8 +36,11 @@ let snapshot = {
   request_bound: 0,
   legacy_unbound: 0,
   reserved: 0,
+  executing: 0,
+  provider_done: 0,
   settling: 0,
   settled: 0,
+  ambiguous: 0,
   failed: 0,
 };
 
@@ -45,21 +58,21 @@ function positiveInteger(value: string | undefined, fallback: number, minimum = 
   return Number.isSafeInteger(parsed) && parsed >= minimum ? parsed : fallback;
 }
 
+export function distributedRecoveryLeaseMs(): number {
+  return positiveInteger(process.env.MISSING_X402_RECOVERY_LEASE_MS, 30_000, 100);
+}
+
 function closePoolSoon() {
   const current = pool;
   pool = null;
   if (current) void current.end().catch(() => undefined);
 }
 
-export function configureDistributedMoneyExecForTest(value: ExecFn | null | undefined) {
-  closePoolSoon();
-  execOverride = value;
-  initialized = false;
-  initializing = null;
-  snapshot = {
+function emptySnapshot() {
+  return {
     enabled: distributedMoneyEnabled(),
     ready: false,
-    backend: "postgres-native",
+    backend: "postgres-native" as const,
     response_cache_enabled: process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED === "1",
     pool_total: 0,
     pool_idle: 0,
@@ -68,10 +81,21 @@ export function configureDistributedMoneyExecForTest(value: ExecFn | null | unde
     request_bound: 0,
     legacy_unbound: 0,
     reserved: 0,
+    executing: 0,
+    provider_done: 0,
     settling: 0,
     settled: 0,
+    ambiguous: 0,
     failed: 0,
   };
+}
+
+export function configureDistributedMoneyExecForTest(value: ExecFn | null | undefined) {
+  closePoolSoon();
+  execOverride = value;
+  initialized = false;
+  initializing = null;
+  snapshot = emptySnapshot();
 }
 
 function poolConfig(): PoolConfig {
@@ -149,7 +173,7 @@ CREATE TABLE IF NOT EXISTS missing_x402_payments (
   request_hash TEXT,
   execution_id TEXT NOT NULL UNIQUE,
   capability TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('reserved','settling','settled','failed')),
+  state TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   reason TEXT,
@@ -163,11 +187,32 @@ CREATE TABLE IF NOT EXISTS missing_x402_payments (
   provider_attempts INTEGER,
   unknown_provider_cost_attempts INTEGER,
   resolution_json TEXT,
-  network TEXT
+  network TEXT,
+  provider_recipe_fingerprint TEXT,
+  provider_recovery_mode TEXT,
+  provider_idempotency_key TEXT,
+  settlement_intent_id TEXT,
+  lease_token TEXT,
+  lease_expires_at TIMESTAMPTZ
 );
 ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS request_hash TEXT;
+ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS provider_recipe_fingerprint TEXT;
+ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS provider_recovery_mode TEXT;
+ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS provider_idempotency_key TEXT;
+ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS settlement_intent_id TEXT;
+ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS lease_token TEXT;
+ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
+ALTER TABLE missing_x402_payments DROP CONSTRAINT IF EXISTS missing_x402_payments_state_check;
+ALTER TABLE missing_x402_payments ADD CONSTRAINT missing_x402_payments_state_check
+  CHECK (state IN ('reserved','executing','provider_done','settling','settled','ambiguous','failed'));
+ALTER TABLE missing_x402_payments DROP CONSTRAINT IF EXISTS missing_x402_payments_provider_recovery_mode_check;
+ALTER TABLE missing_x402_payments ADD CONSTRAINT missing_x402_payments_provider_recovery_mode_check
+  CHECK (provider_recovery_mode IS NULL OR provider_recovery_mode IN ('read_only','idempotent','ambiguous'));
 CREATE INDEX IF NOT EXISTS idx_missing_x402_state_updated
   ON missing_x402_payments(state, updated_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_missing_x402_settlement_intent
+  ON missing_x402_payments(settlement_intent_id)
+  WHERE settlement_intent_id IS NOT NULL;
 `;
 
 function integer(value: unknown): number | null {
@@ -176,11 +221,15 @@ function integer(value: unknown): number | null {
   return typeof n === "number" && Number.isSafeInteger(n) ? n : null;
 }
 
+function recoveryMode(value: unknown): ProviderRecoveryMode | null {
+  return value === "read_only" || value === "idempotent" || value === "ambiguous" ? value : null;
+}
+
 function parseRecordLine(line: string): DistributedPaymentRecord | null {
   if (!line.trim()) return null;
   const value = JSON.parse(line) as Record<string, unknown>;
   const state = value.state;
-  if (state !== "reserved" && state !== "settling" && state !== "settled" && state !== "failed") return null;
+  if (state !== "reserved" && state !== "executing" && state !== "provider_done" && state !== "settling" && state !== "settled" && state !== "ambiguous" && state !== "failed") return null;
   return {
     payment_hash: String(value.payment_hash), request_hash: value.request_hash == null ? null : String(value.request_hash),
     execution_id: String(value.execution_id), capability: String(value.capability), state,
@@ -195,6 +244,12 @@ function parseRecordLine(line: string): DistributedPaymentRecord | null {
     unknown_provider_cost_attempts: integer(value.unknown_provider_cost_attempts),
     resolution_json: value.resolution_json == null ? null : String(value.resolution_json),
     network: value.network == null ? null : String(value.network),
+    provider_recipe_fingerprint: value.provider_recipe_fingerprint == null ? null : String(value.provider_recipe_fingerprint),
+    provider_recovery_mode: recoveryMode(value.provider_recovery_mode),
+    provider_idempotency_key: value.provider_idempotency_key == null ? null : String(value.provider_idempotency_key),
+    settlement_intent_id: value.settlement_intent_id == null ? null : String(value.settlement_intent_id),
+    lease_token: value.lease_token == null ? null : String(value.lease_token),
+    lease_expires_at: value.lease_expires_at == null ? null : String(value.lease_expires_at),
   };
 }
 
@@ -204,15 +259,15 @@ function poolSnapshot() {
 
 async function refreshSnapshot() {
   if (!distributedMoneyEnabled()) return snapshot = { ...snapshot, enabled: false, ready: false, ...poolSnapshot() };
-  const { stdout } = await run(`SELECT row_to_json(x) FROM (SELECT COUNT(*)::bigint AS payments, COUNT(*) FILTER (WHERE request_hash IS NOT NULL)::bigint AS request_bound, COUNT(*) FILTER (WHERE request_hash IS NULL)::bigint AS legacy_unbound, COUNT(*) FILTER (WHERE state='reserved')::bigint AS reserved, COUNT(*) FILTER (WHERE state='settling')::bigint AS settling, COUNT(*) FILTER (WHERE state='settled')::bigint AS settled, COUNT(*) FILTER (WHERE state='failed')::bigint AS failed FROM missing_x402_payments) x;`);
+  const { stdout } = await run(`SELECT row_to_json(x) FROM (SELECT COUNT(*)::bigint AS payments, COUNT(*) FILTER (WHERE request_hash IS NOT NULL)::bigint AS request_bound, COUNT(*) FILTER (WHERE request_hash IS NULL)::bigint AS legacy_unbound, COUNT(*) FILTER (WHERE state='reserved')::bigint AS reserved, COUNT(*) FILTER (WHERE state='executing')::bigint AS executing, COUNT(*) FILTER (WHERE state='provider_done')::bigint AS provider_done, COUNT(*) FILTER (WHERE state='settling')::bigint AS settling, COUNT(*) FILTER (WHERE state='settled')::bigint AS settled, COUNT(*) FILTER (WHERE state='ambiguous')::bigint AS ambiguous, COUNT(*) FILTER (WHERE state='failed')::bigint AS failed FROM missing_x402_payments) x;`);
   const row = stdout.trim() ? JSON.parse(stdout.trim()) as Record<string, unknown> : {};
   snapshot = {
     enabled: true, ready: true, backend: "postgres-native",
     response_cache_enabled: process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED === "1",
     ...poolSnapshot(),
     payments: integer(row.payments) ?? 0, request_bound: integer(row.request_bound) ?? 0, legacy_unbound: integer(row.legacy_unbound) ?? 0,
-    reserved: integer(row.reserved) ?? 0, settling: integer(row.settling) ?? 0,
-    settled: integer(row.settled) ?? 0, failed: integer(row.failed) ?? 0,
+    reserved: integer(row.reserved) ?? 0, executing: integer(row.executing) ?? 0, provider_done: integer(row.provider_done) ?? 0,
+    settling: integer(row.settling) ?? 0, settled: integer(row.settled) ?? 0, ambiguous: integer(row.ambiguous) ?? 0, failed: integer(row.failed) ?? 0,
   };
   return snapshot;
 }
@@ -242,52 +297,113 @@ export async function distributedPayment(paymentHash: string): Promise<Distribut
   return parseRecordLine(stdout.trim());
 }
 
+function leaseVars(token: string) {
+  return { lease_token: token, lease_ms: String(distributedRecoveryLeaseMs()) };
+}
+
+function leaseCondition(leaseToken?: string) {
+  return leaseToken ? " AND lease_token=:'lease_token'" : "";
+}
+
 export async function reserveDistributedPayment(args: { paymentHash: string; requestHash: string; executionId: string; capability: string }) {
   await ensureReady();
-  const { stdout } = await run(`WITH ins AS (INSERT INTO missing_x402_payments(payment_hash,request_hash,execution_id,capability,state) VALUES (:'payment_hash',:'request_hash',:'execution_id',:'capability','reserved') ON CONFLICT (payment_hash) DO NOTHING RETURNING *) SELECT row_to_json(ins) FROM ins;`, {
+  const vars = {
     payment_hash: args.paymentHash, request_hash: args.requestHash, execution_id: args.executionId, capability: args.capability,
-  });
+    ...leaseVars(args.executionId),
+  };
+  const { stdout } = await run(`WITH ins AS (INSERT INTO missing_x402_payments(payment_hash,request_hash,execution_id,capability,state,lease_token,lease_expires_at) VALUES (:'payment_hash',:'request_hash',:'execution_id',:'capability','reserved',:'lease_token',NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond')) ON CONFLICT (payment_hash) DO NOTHING RETURNING *) SELECT row_to_json(ins) FROM ins;`, vars);
   const inserted = parseRecordLine(stdout.trim());
   const prior = inserted ?? await distributedPayment(args.paymentHash);
   await refreshSnapshot();
-  return { enabled: true as const, reserved: Boolean(inserted), prior };
+  return { enabled: true as const, reserved: Boolean(inserted), prior, leaseToken: inserted ? args.executionId : null };
 }
 
-export async function markDistributedPaymentSettling(args: { paymentHash: string; executionId: string; customerPriceMicrousd: number; providerCostMicrousd: number | null; grossMarginMicrousd: number | null; providerAttempts: number; unknownProviderCostAttempts: number; resolution: unknown; network: string }) {
+export async function claimDistributedRecovery(args: { paymentHash: string; requestHash: string; leaseToken: string }) {
   await ensureReady();
+  const vars = { payment_hash: args.paymentHash, request_hash: args.requestHash, ...leaseVars(args.leaseToken) };
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET lease_token=:'lease_token',lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond'),updated_at=NOW() WHERE payment_hash=:'payment_hash' AND request_hash=:'request_hash' AND state IN ('reserved','executing','provider_done','settling') AND (lease_expires_at IS NULL OR lease_expires_at <= NOW()) RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  const rec = parseRecordLine(stdout.trim());
+  await refreshSnapshot();
+  return { claimed: Boolean(rec), record: rec, leaseToken: rec ? args.leaseToken : null };
+}
+
+export async function markDistributedPaymentExecuting(args: { paymentHash: string; executionId: string; recipeFingerprint: string; recoveryMode: ProviderRecoveryMode; providerIdempotencyKey?: string | null; leaseToken?: string }) {
+  await ensureReady();
+  const token = args.leaseToken ?? args.executionId;
+  const vars = {
+    payment_hash: args.paymentHash, execution_id: args.executionId, recipe_fingerprint: args.recipeFingerprint,
+    recovery_mode: args.recoveryMode, provider_idempotency_key: args.providerIdempotencyKey ?? "", ...leaseVars(token),
+  };
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='executing',updated_at=NOW(),reason=NULL,provider_recipe_fingerprint=:'recipe_fingerprint',provider_recovery_mode=:'recovery_mode',provider_idempotency_key=NULLIF(:'provider_idempotency_key',''),lease_token=:'lease_token',lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state IN ('reserved','executing')${leaseCondition(args.leaseToken)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  await refreshSnapshot();
+  const rec = parseRecordLine(stdout.trim());
+  return { changed: Boolean(rec), record: rec, leaseToken: rec ? token : null };
+}
+
+export async function markDistributedProviderDone(args: { paymentHash: string; executionId: string; customerPriceMicrousd: number; providerCostMicrousd: number | null; grossMarginMicrousd: number | null; providerAttempts: number; unknownProviderCostAttempts: number; resolution: unknown; network: string; leaseToken?: string }) {
+  await ensureReady();
+  const token = args.leaseToken ?? args.executionId;
   const vars = {
     payment_hash: args.paymentHash, execution_id: args.executionId, customer_price: String(args.customerPriceMicrousd),
     provider_cost: args.providerCostMicrousd === null ? "" : String(args.providerCostMicrousd),
     gross_margin: args.grossMarginMicrousd === null ? "" : String(args.grossMarginMicrousd), provider_attempts: String(args.providerAttempts),
     unknown_attempts: String(args.unknownProviderCostAttempts), resolution_b64: Buffer.from(JSON.stringify(args.resolution), "utf8").toString("base64"), network: args.network,
+    ...leaseVars(token),
   };
-  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='settling',updated_at=NOW(),reason=NULL,customer_price_microusd=:'customer_price'::bigint,provider_cost_microusd=NULLIF(:'provider_cost','')::bigint,gross_margin_microusd=NULLIF(:'gross_margin','')::bigint,provider_attempts=:'provider_attempts'::int,unknown_provider_cost_attempts=:'unknown_attempts'::int,resolution_json=convert_from(decode(:'resolution_b64','base64'),'UTF8'),network=:'network' WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='reserved' RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='provider_done',updated_at=NOW(),reason=NULL,customer_price_microusd=:'customer_price'::bigint,provider_cost_microusd=NULLIF(:'provider_cost','')::bigint,gross_margin_microusd=NULLIF(:'gross_margin','')::bigint,provider_attempts=:'provider_attempts'::int,unknown_provider_cost_attempts=:'unknown_attempts'::int,resolution_json=convert_from(decode(:'resolution_b64','base64'),'UTF8'),network=:'network',lease_token=:'lease_token',lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='executing'${leaseCondition(args.leaseToken)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   await refreshSnapshot();
   const rec = parseRecordLine(stdout.trim());
-  return { changed: Boolean(rec), record: rec };
+  return { changed: Boolean(rec), record: rec, leaseToken: rec ? token : null };
 }
 
-export async function markDistributedSettlementPending(args: { paymentHash: string; executionId: string; transactionReference: string; reason: string }) {
+export async function markDistributedPaymentSettling(args: { paymentHash: string; executionId: string; customerPriceMicrousd: number; providerCostMicrousd: number | null; grossMarginMicrousd: number | null; providerAttempts: number; unknownProviderCostAttempts: number; resolution: unknown; network: string; settlementIntentId?: string | null; leaseToken?: string }) {
   await ensureReady();
-  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET updated_at=NOW(),reason=:'reason',transaction_reference=:'transaction_reference' WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='settling' RETURNING *) SELECT row_to_json(upd) FROM upd;`, { payment_hash: args.paymentHash, execution_id: args.executionId, reason: args.reason, transaction_reference: args.transactionReference });
+  const token = args.leaseToken ?? args.executionId;
+  const vars = {
+    payment_hash: args.paymentHash, execution_id: args.executionId, customer_price: String(args.customerPriceMicrousd),
+    provider_cost: args.providerCostMicrousd === null ? "" : String(args.providerCostMicrousd),
+    gross_margin: args.grossMarginMicrousd === null ? "" : String(args.grossMarginMicrousd), provider_attempts: String(args.providerAttempts),
+    unknown_attempts: String(args.unknownProviderCostAttempts), resolution_b64: Buffer.from(JSON.stringify(args.resolution), "utf8").toString("base64"), network: args.network,
+    settlement_intent_id: args.settlementIntentId ?? "", ...leaseVars(token),
+  };
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='settling',updated_at=NOW(),reason=NULL,customer_price_microusd=:'customer_price'::bigint,provider_cost_microusd=NULLIF(:'provider_cost','')::bigint,gross_margin_microusd=NULLIF(:'gross_margin','')::bigint,provider_attempts=:'provider_attempts'::int,unknown_provider_cost_attempts=:'unknown_attempts'::int,resolution_json=convert_from(decode(:'resolution_b64','base64'),'UTF8'),network=:'network',settlement_intent_id=COALESCE(NULLIF(:'settlement_intent_id',''),settlement_intent_id),lease_token=:'lease_token',lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state IN ('reserved','provider_done')${leaseCondition(args.leaseToken)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  await refreshSnapshot();
+  const rec = parseRecordLine(stdout.trim());
+  return { changed: Boolean(rec), record: rec, leaseToken: rec ? token : null };
+}
+
+export async function markDistributedSettlementPending(args: { paymentHash: string; executionId: string; transactionReference: string; reason: string; leaseToken?: string }) {
+  await ensureReady();
+  const token = args.leaseToken ?? args.executionId;
+  const vars = { payment_hash: args.paymentHash, execution_id: args.executionId, reason: args.reason, transaction_reference: args.transactionReference, ...leaseVars(token) };
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET updated_at=NOW(),reason=:'reason',transaction_reference=:'transaction_reference',lease_token=:'lease_token',lease_expires_at=NOW() + (:'lease_ms'::bigint * INTERVAL '1 millisecond') WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='settling'${leaseCondition(args.leaseToken)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  await refreshSnapshot(); const rec = parseRecordLine(stdout.trim()); return { changed: Boolean(rec), record: rec, leaseToken: rec ? token : null };
+}
+
+export async function markDistributedPaymentAmbiguous(args: { paymentHash: string; executionId: string; reason: string; from?: "reserved" | "executing" | "provider_done" | "settling"; leaseToken?: string }) {
+  await ensureReady();
+  const vars = { payment_hash: args.paymentHash, execution_id: args.executionId, reason: args.reason, from_state: args.from ?? "executing", lease_token: args.leaseToken ?? "" };
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='ambiguous',updated_at=NOW(),reason=:'reason',lease_token=NULL,lease_expires_at=NULL WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state=:'from_state'${leaseCondition(args.leaseToken)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   await refreshSnapshot(); const rec = parseRecordLine(stdout.trim()); return { changed: Boolean(rec), record: rec };
 }
 
-export async function failDistributedPayment(args: { paymentHash: string; executionId: string; reason: string; from?: "reserved" | "settling" }) {
+export async function failDistributedPayment(args: { paymentHash: string; executionId: string; reason: string; from?: "reserved" | "executing" | "provider_done" | "settling"; leaseToken?: string }) {
   await ensureReady();
-  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='failed',updated_at=NOW(),reason=:'reason' WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state=:'from_state' RETURNING *) SELECT row_to_json(upd) FROM upd;`, { payment_hash: args.paymentHash, execution_id: args.executionId, reason: args.reason, from_state: args.from ?? "reserved" });
+  const vars = { payment_hash: args.paymentHash, execution_id: args.executionId, reason: args.reason, from_state: args.from ?? "reserved", lease_token: args.leaseToken ?? "" };
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='failed',updated_at=NOW(),reason=:'reason',lease_token=NULL,lease_expires_at=NULL WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state=:'from_state'${leaseCondition(args.leaseToken)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   await refreshSnapshot(); const rec = parseRecordLine(stdout.trim()); return { changed: Boolean(rec), record: rec };
 }
 
-export async function settleDistributedPayment(args: { paymentHash: string; executionId: string; transactionReference: string; responseStatus: number; responseHeaders: Record<string, string>; responseBody: unknown }) {
+export async function settleDistributedPayment(args: { paymentHash: string; executionId: string; transactionReference: string; responseStatus: number; responseHeaders: Record<string, string>; responseBody: unknown; leaseToken?: string }) {
   await ensureReady();
   const cache = process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED === "1";
   const vars = {
     payment_hash: args.paymentHash, execution_id: args.executionId, transaction_reference: args.transactionReference, response_status: String(args.responseStatus),
     headers_b64: cache ? Buffer.from(JSON.stringify(args.responseHeaders), "utf8").toString("base64") : "",
     body_b64: cache ? Buffer.from(JSON.stringify(args.responseBody), "utf8").toString("base64") : "",
+    lease_token: args.leaseToken ?? "",
   };
-  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='settled',updated_at=NOW(),reason=NULL,transaction_reference=:'transaction_reference',response_status=:'response_status'::int,response_headers_json=CASE WHEN :'headers_b64'='' THEN NULL ELSE convert_from(decode(:'headers_b64','base64'),'UTF8') END,response_body_json=CASE WHEN :'body_b64'='' THEN NULL ELSE convert_from(decode(:'body_b64','base64'),'UTF8') END WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='settling' RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
+  const { stdout } = await run(`WITH upd AS (UPDATE missing_x402_payments SET state='settled',updated_at=NOW(),reason=NULL,transaction_reference=:'transaction_reference',response_status=:'response_status'::int,response_headers_json=CASE WHEN :'headers_b64'='' THEN NULL ELSE convert_from(decode(:'headers_b64','base64'),'UTF8') END,response_body_json=CASE WHEN :'body_b64'='' THEN NULL ELSE convert_from(decode(:'body_b64','base64'),'UTF8') END,lease_token=NULL,lease_expires_at=NULL WHERE payment_hash=:'payment_hash' AND execution_id=:'execution_id' AND state='settling'${leaseCondition(args.leaseToken)} RETURNING *) SELECT row_to_json(upd) FROM upd;`, vars);
   await refreshSnapshot(); const rec = parseRecordLine(stdout.trim()); return { changed: Boolean(rec), record: rec };
 }
 

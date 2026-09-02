@@ -1,0 +1,51 @@
+name: Kappa.5.8 Ambiguous Outcome Recovery
+on:
+  push:
+    branches: [product-kappa58-ambiguous-outcome-recovery]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ambiguous-outcome-recovery:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: missing
+          POSTGRES_PASSWORD: missing
+          POSTGRES_DB: missing_kappa58
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U missing -d missing_kappa58"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Run Kappa.5.8 ambiguous outcome recovery proof
+        env:
+          MISSING_DISTRIBUTED_MONEY_ENABLED: "1"
+          MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED: "0"
+          MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_kappa58?sslmode=disable
+          MISSING_POSTGRES_SSLMODE: disable
+        run: npx tsx src/experimentKappa58.ts
+      - name: Verify Kappa.5.8 evidence exists
+        run: test -s artifacts/product-kappa58-ambiguous-outcome-recovery.json
+      - name: Upload Kappa.5.8 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-kappa58-ambiguous-outcome-recovery
+          path: artifacts/product-kappa58-ambiguous-outcome-recovery.json
+          if-no-files-found: warn

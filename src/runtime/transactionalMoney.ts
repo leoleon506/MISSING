@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { economicsLedgerPath } from "./economics.js";
 
-export type TransactionalPaymentState = "reserved" | "settling" | "settled" | "failed";
+export type TransactionalPaymentState = "reserved" | "executing" | "provider_done" | "settling" | "settled" | "ambiguous" | "failed";
 
 export interface TransactionalPaymentRecord {
   payment_hash: string;
