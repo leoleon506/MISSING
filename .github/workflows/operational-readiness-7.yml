@@ -1,0 +1,32 @@
+name: Operational Readiness 7 Dependency Backpressure Retry Storm
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-backpressure-retry-storm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Operational dependency backpressure retry storm proof
+        run: npx tsx src/operationalReadiness7.ts
+      - name: Verify OR7 evidence exists
+        run: test -s artifacts/operational-readiness-7-dependency-backpressure-retry-storm.json
+      - name: Upload OR7 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-readiness-7-dependency-backpressure-retry-storm
+          path: artifacts/operational-readiness-7-dependency-backpressure-retry-storm.json

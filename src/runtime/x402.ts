@@ -3,6 +3,7 @@ import type { ResolveResult, VerifiedRecipe } from "./types.js";
 import { distributedMoneyEnabled, distributedMoneySnapshot } from "./distributedMoney.js";
 import { settledReorgMonitorSnapshot } from "./settledReorgMonitor.js";
 import { x402FinalityPolicy, x402RpcUrl } from "./x402Reconciliation.js";
+import { runDependencyOperation } from "./dependencyBackpressure.js";
 
 export interface X402Requirements {
   scheme: "exact";
@@ -203,16 +204,19 @@ function paymentHash(header: string): string {
 
 async function facilitatorPost(path: "verify" | "settle", body: unknown, extraHeaders: Record<string, string> = {}): Promise<any> {
   const c = x402Config();
-  if (!c.facilitatorUrl) throw new Error("x402 facilitator is not configured");
+  const facilitatorUrl = c.facilitatorUrl;
+  if (!facilitatorUrl) throw new Error("x402 facilitator is not configured");
   const headers: Record<string, string> = { "Content-Type": "application/json", ...extraHeaders };
   if (c.facilitatorBearer) headers.Authorization = `Bearer ${c.facilitatorBearer}`;
-  const response = await facilitatorFetch(`${c.facilitatorUrl.replace(/\/$/, "")}/${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
+  return runDependencyOperation(path === "verify" ? "facilitator_verify" : "facilitator_settle", async () => {
+    const response = await facilitatorFetch(`${facilitatorUrl.replace(/\/$/, "")}/${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
+    return response.json();
   });
-  if (!response.ok) throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
-  return response.json();
 }
 
 export async function verifyX402Payment(args: { paymentSignature: string; requirements: X402Requirements }) {
