@@ -134,8 +134,13 @@ async function run(sql: string, vars: Record<string, string> = {}): Promise<Exec
     return execOverride(sql, vars);
   }
   const query = parameterize(sql, vars);
-  const result = await nativePool().query(query.text, query.values);
-  return { stdout: stdoutFromRows(result.rows), stderr: "" };
+  const result = await nativePool().query(query.text, query.values) as unknown as
+    | { rows?: QueryResultRow[] }
+    | Array<{ rows?: QueryResultRow[] }>;
+  const rows = Array.isArray(result)
+    ? result.flatMap(item => item.rows ?? [])
+    : result.rows ?? [];
+  return { stdout: stdoutFromRows(rows), stderr: "" };
 }
 
 const SCHEMA_SQL = `
