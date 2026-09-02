@@ -59,7 +59,11 @@ evidence.scenarios.push({
 
 const verified = baseRecipe();
 verified.verification = {
-  ...verified.verification,
+  status: "replay_verified",
+  source: "product_live",
+  verification_inputs: [{ value: "verified" }],
+  verified_at: "2026-09-02",
+  evidence_url: "https://example.test/kappa512",
   safe_post: {
     policy: "lambda2",
     signals: [{
