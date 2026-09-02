@@ -1,0 +1,33 @@
+name: Kappa.5.12 Verified Idempotency Contracts
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [product-kappa512-verified-idempotency-contracts]
+
+jobs:
+  verified-idempotency-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Focused Kappa.5.12 tests
+        run: npx vitest run tests/productKappa512VerifiedIdempotency.test.ts
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Run Kappa.5.12 verified idempotency proof
+        run: npx tsx src/experimentKappa512.ts
+      - name: Verify Kappa.5.12 evidence exists
+        run: test -s artifacts/product-kappa512-verified-idempotency-contracts.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: product-kappa512-verified-idempotency-contracts
+          path: artifacts/product-kappa512-verified-idempotency-contracts.json
+          if-no-files-found: warn
