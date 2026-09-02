@@ -24,9 +24,14 @@ export function configureSupplyLedger(path: string | null | undefined) {
   overridePath = path === undefined ? undefined : path === null ? null : resolve(path);
 }
 
-function stringRecord(value: unknown): value is Record<string, string> {
+function plainRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
-    && Object.entries(value as Record<string, unknown>).every(([key, item]) => Boolean(key) && typeof item === "string");
+    && Object.keys(value as Record<string, unknown>).every(key => Boolean(key));
+}
+
+function stringRecord(value: unknown): value is Record<string, string> {
+  return plainRecord(value)
+    && Object.entries(value).every(([, item]) => typeof item === "string");
 }
 
 function credentialBindings(value: unknown): value is CredentialBinding[] {
@@ -65,6 +70,7 @@ function isVerifiedRecipe(value: unknown): value is VerifiedRecipe {
     && (recipe.static_headers === undefined || stringRecord(recipe.static_headers))
     && (recipe.credential_bindings === undefined || credentialBindings(recipe.credential_bindings))
     && (recipe.generated_headers === undefined || generatedHeaderBindings(recipe.generated_headers))
+    && (recipe.forced_inputs === undefined || plainRecord(recipe.forced_inputs))
     && !!recipe.verification
     && recipe.verification.status === "replay_verified";
 }
