@@ -1,0 +1,33 @@
+name: Operational Readiness 8 RPC Backpressure Proof Storm
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rpc-backpressure-proof-storm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Operational RPC backpressure proof storm proof
+        run: npx tsx src/operationalReadiness8.ts
+      - name: Verify OR8 evidence exists
+        run: test -s artifacts/operational-readiness-8-rpc-backpressure-proof-storm.json
+      - name: Upload OR8 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-readiness-8-rpc-backpressure-proof-storm
+          path: artifacts/operational-readiness-8-rpc-backpressure-proof-storm.json
