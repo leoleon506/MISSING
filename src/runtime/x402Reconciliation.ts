@@ -1,3 +1,5 @@
+import { runDependencyOperation } from "./dependencyBackpressure.js";
+
 export type X402TransactionState = "confirmed" | "failed" | "pending" | "unavailable";
 export type X402SettlementProofState = "verified" | "failed" | "pending" | "unavailable";
 export type X402FinalityPolicySource = "per_chain_env" | "legacy_global_env" | "builtin";
@@ -109,15 +111,18 @@ async function rpc(method: string, params: unknown[]): Promise<{ ok: true; resul
   const url = x402RpcUrl();
   if (!url) return { ok: false, reason: "rpc_not_configured" };
   try {
-    const response = await rpcFetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    const result = await runDependencyOperation("rpc", async () => {
+      const response = await rpcFetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+      if (!response.ok) throw new Error(`rpc_http_${response.status}`);
+      const body = await response.json() as any;
+      if (body?.error) throw new Error(typeof body.error.message === "string" ? body.error.message : "rpc_error");
+      return body?.result;
     });
-    if (!response.ok) return { ok: false, reason: `rpc_http_${response.status}` };
-    const body = await response.json() as any;
-    if (body?.error) return { ok: false, reason: typeof body.error.message === "string" ? body.error.message : "rpc_error" };
-    return { ok: true, result: body?.result };
+    return { ok: true, result };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
