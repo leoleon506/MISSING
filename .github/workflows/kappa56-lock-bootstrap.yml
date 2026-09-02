@@ -1,0 +1,22 @@
+name: Kappa.5.6 Lock Bootstrap
+on:
+  push:
+    branches: [product-kappa56-native-postgres-pooling]
+
+jobs:
+  lock-bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Generate package lock
+        run: npm install --package-lock-only --ignore-scripts
+      - name: Upload package lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: kappa56-package-lock
+          path: package-lock.json
+          if-no-files-found: error
