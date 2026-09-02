@@ -1,0 +1,47 @@
+name: Kappa.5.13 Owned Known-Tx Reconciliation
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [product-kappa513-owned-known-tx-reconciliation]
+
+jobs:
+  owned-known-tx-reconciliation:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: missing
+          POSTGRES_PASSWORD: missing
+          POSTGRES_DB: missing_kappa513
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U missing -d missing_kappa513"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Run Kappa.5.13 owned known-tx reconciliation proof
+        env:
+          MISSING_POSTGRES_URL: postgresql://missing:missing@127.0.0.1:5432/missing_kappa513?sslmode=disable
+          MISSING_POSTGRES_SSLMODE: disable
+        run: npx tsx src/experimentKappa513.ts
+      - name: Verify Kappa.5.13 evidence exists
+        run: test -s artifacts/product-kappa513-owned-known-tx-reconciliation.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: product-kappa513-owned-known-tx-reconciliation
+          path: artifacts/product-kappa513-owned-known-tx-reconciliation.json
+          if-no-files-found: warn

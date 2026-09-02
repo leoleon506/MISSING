@@ -58,11 +58,15 @@ import { x402SettlementProof } from "./x402Reconciliation.js";
 
 const inFlightPayments = new Set<string>();
 
-export type AgentPaymentCrashPoint = "after_reservation" | "after_provider_effect" | "after_settlement_effect";
+export type AgentPaymentCrashPoint =
+  | "after_reservation"
+  | "after_provider_effect"
+  | "after_settlement_effect"
+  | "after_settlement_transaction_persisted";
 type AgentPaymentCrashHook = (point: AgentPaymentCrashPoint, context: { paymentHash: string; executionId: string }) => void | Promise<void>;
 let crashHook: AgentPaymentCrashHook | null = null;
 
-/** Test-only fault injection used by Kappa.5.9 workers to kill the real production path at exact crash windows. */
+/** Test-only fault injection used by Kappa recovery workers to kill the real production path at exact crash windows. */
 export function configureAgentPaymentCrashHookForTest(hook?: AgentPaymentCrashHook) {
   crashHook = hook ?? null;
 }
@@ -169,12 +173,21 @@ function storedRecipe(record: DistributedPaymentRecord, resolution?: ResolveResu
   return fingerprint ? VERIFIED_RECIPES.find(item => item.recipe_fingerprint === fingerprint) ?? null : null;
 }
 
-async function reconcileKnownDistributedSettlement(prior: DistributedPaymentRecord, currentRequestHash: string): Promise<AgentPaymentHttpResult> {
+async function reconcileKnownDistributedSettlement(
+  prior: DistributedPaymentRecord,
+  currentRequestHash: string,
+  leaseToken: string,
+): Promise<AgentPaymentHttpResult> {
   const asset = process.env.MISSING_X402_ASSET?.trim();
   const payTo = process.env.MISSING_X402_PAY_TO?.trim();
   if (!prior.network || prior.customer_price_microusd === null || !asset || !payTo || !prior.transaction_reference) {
     return { status: 503, body: { error: "payment_reconciliation_data_incomplete", prior_state: "settling" } };
   }
+
+  // Kappa.5.13 invariant: a known transaction may only be reconciled after the
+  // current process has verified the payment and successfully acquired the durable
+  // recovery lease/fence. Every authoritative transition below therefore carries
+  // the newly claimed lease token.
   const chain = await x402SettlementProof({
     transaction: prior.transaction_reference,
     network: prior.network,
@@ -192,6 +205,7 @@ async function reconcileKnownDistributedSettlement(prior: DistributedPaymentReco
       responseStatus: 200,
       responseHeaders: reconstructed.headers,
       responseBody: reconstructed.body,
+      leaseToken,
     });
     if (!committed.changed) {
       const latest = await distributedPayment(prior.payment_hash);
@@ -220,7 +234,13 @@ async function reconcileKnownDistributedSettlement(prior: DistributedPaymentReco
     return { status: 200, headers: reconstructed.headers, body: reconstructed.body };
   }
   if (chain.state === "failed") {
-    await failDistributedPayment({ paymentHash: prior.payment_hash, executionId: prior.execution_id, reason: `settlement_proof_${chain.reason ?? "failed"}`, from: "settling" });
+    await failDistributedPayment({
+      paymentHash: prior.payment_hash,
+      executionId: prior.execution_id,
+      reason: `settlement_proof_${chain.reason ?? "failed"}`,
+      from: "settling",
+      leaseToken,
+    });
     return { status: 409, body: { error: "payment_settlement_proof_failed", reason: chain.reason, prior_state: "failed", payment_settled: false, transaction: prior.transaction_reference } };
   }
   return {
@@ -236,8 +256,9 @@ async function reconcileKnownDistributedSettlement(prior: DistributedPaymentReco
 }
 
 /**
- * Returns terminal/reconcilable results. Active durable states return null so the
- * verified request can try to acquire the recovery lease and resume production work.
+ * Returns terminal results only. Every active durable state, including a settling
+ * record with a known transaction, returns null so the request must first pass x402
+ * verification and acquire the recovery lease before any reconciliation side effect.
  */
 async function priorDistributedResult(paymentKey: string, currentRequestHash: string): Promise<AgentPaymentHttpResult | null> {
   if (!distributedMoneyEnabled()) return null;
@@ -248,7 +269,6 @@ async function priorDistributedResult(paymentKey: string, currentRequestHash: st
   const cached = cachedDistributedResponse(prior);
   if (cached) return cached;
 
-  if (prior.state === "settling" && prior.transaction_reference) return reconcileKnownDistributedSettlement(prior, currentRequestHash);
   if (prior.state === "reserved" || prior.state === "executing" || prior.state === "provider_done" || prior.state === "settling") return null;
   if (prior.state === "ambiguous") {
     return { status: 409, body: { error: "payment_outcome_ambiguous", prior_state: "ambiguous", reason: prior.reason, payment_settled: false } };
@@ -383,6 +403,8 @@ async function finishDistributedSettlement(args: {
   });
   if (!observed.changed) return { status: 503, body: { error: "payment_settlement_reconciliation_required", payment_settled: false, transaction: settlement.transaction } };
 
+  await crashPoint("after_settlement_transaction_persisted", args.record.payment_hash, args.record.execution_id);
+
   const chain = await x402SettlementProof({
     transaction: settlement.transaction,
     network: args.requirements.network,
@@ -516,7 +538,9 @@ async function resumeDistributedPayment(args: {
     resolution = storedResolution(record) ?? resolution;
     recipe = storedRecipe(record, resolution) ?? recipe;
   }
-  if (record.state === "settling" && record.transaction_reference) return reconcileKnownDistributedSettlement(record, args.requestHash);
+  if (record.state === "settling" && record.transaction_reference) {
+    return reconcileKnownDistributedSettlement(record, args.requestHash, args.leaseToken);
+  }
   if (record.state === "settling" && !record.settlement_intent_id) {
     await markDistributedPaymentAmbiguous({ paymentHash: record.payment_hash, executionId: record.execution_id, reason: "settlement_outcome_unknown_without_durable_intent", from: "settling", leaseToken: args.leaseToken });
     return { status: 409, body: { error: "payment_outcome_ambiguous", prior_state: "ambiguous", payment_settled: false } };
