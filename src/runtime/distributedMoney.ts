@@ -18,6 +18,8 @@ let snapshot = {
   backend: "postgres-psql" as const,
   response_cache_enabled: false,
   payments: 0,
+  request_bound: 0,
+  legacy_unbound: 0,
   reserved: 0,
   settling: 0,
   settled: 0,
@@ -42,6 +44,8 @@ export function configureDistributedMoneyExecForTest(value: ExecFn | null | unde
     backend: "postgres-psql",
     response_cache_enabled: process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED === "1",
     payments: 0,
+    request_bound: 0,
+    legacy_unbound: 0,
     reserved: 0,
     settling: 0,
     settled: 0,
@@ -90,6 +94,7 @@ async function run(sql: string, vars: Record<string, string> = {}): Promise<Exec
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS missing_x402_payments (
   payment_hash TEXT PRIMARY KEY,
+  request_hash TEXT,
   execution_id TEXT NOT NULL UNIQUE,
   capability TEXT NOT NULL,
   state TEXT NOT NULL CHECK (state IN ('reserved','settling','settled','failed')),
@@ -108,6 +113,7 @@ CREATE TABLE IF NOT EXISTS missing_x402_payments (
   resolution_json TEXT,
   network TEXT
 );
+ALTER TABLE missing_x402_payments ADD COLUMN IF NOT EXISTS request_hash TEXT;
 CREATE INDEX IF NOT EXISTS idx_missing_x402_state_updated
   ON missing_x402_payments(state, updated_at);
 `;
@@ -124,7 +130,8 @@ function parseRecordLine(line: string): DistributedPaymentRecord | null {
   const state = value.state;
   if (state !== "reserved" && state !== "settling" && state !== "settled" && state !== "failed") return null;
   return {
-    payment_hash: String(value.payment_hash), execution_id: String(value.execution_id), capability: String(value.capability), state,
+    payment_hash: String(value.payment_hash), request_hash: value.request_hash == null ? null : String(value.request_hash),
+    execution_id: String(value.execution_id), capability: String(value.capability), state,
     created_at: String(value.created_at), updated_at: String(value.updated_at),
     reason: value.reason == null ? null : String(value.reason),
     transaction_reference: value.transaction_reference == null ? null : String(value.transaction_reference),
@@ -141,12 +148,13 @@ function parseRecordLine(line: string): DistributedPaymentRecord | null {
 
 async function refreshSnapshot() {
   if (!distributedMoneyEnabled()) return snapshot = { ...snapshot, enabled: false, ready: false };
-  const { stdout } = await run(`SELECT row_to_json(x) FROM (SELECT COUNT(*)::bigint AS payments, COUNT(*) FILTER (WHERE state='reserved')::bigint AS reserved, COUNT(*) FILTER (WHERE state='settling')::bigint AS settling, COUNT(*) FILTER (WHERE state='settled')::bigint AS settled, COUNT(*) FILTER (WHERE state='failed')::bigint AS failed FROM missing_x402_payments) x;`);
+  const { stdout } = await run(`SELECT row_to_json(x) FROM (SELECT COUNT(*)::bigint AS payments, COUNT(*) FILTER (WHERE request_hash IS NOT NULL)::bigint AS request_bound, COUNT(*) FILTER (WHERE request_hash IS NULL)::bigint AS legacy_unbound, COUNT(*) FILTER (WHERE state='reserved')::bigint AS reserved, COUNT(*) FILTER (WHERE state='settling')::bigint AS settling, COUNT(*) FILTER (WHERE state='settled')::bigint AS settled, COUNT(*) FILTER (WHERE state='failed')::bigint AS failed FROM missing_x402_payments) x;`);
   const row = stdout.trim() ? JSON.parse(stdout.trim()) as Record<string, unknown> : {};
   snapshot = {
     enabled: true, ready: true, backend: "postgres-psql",
     response_cache_enabled: process.env.MISSING_TRANSACTIONAL_RESPONSE_CACHE_ENABLED === "1",
-    payments: integer(row.payments) ?? 0, reserved: integer(row.reserved) ?? 0, settling: integer(row.settling) ?? 0,
+    payments: integer(row.payments) ?? 0, request_bound: integer(row.request_bound) ?? 0, legacy_unbound: integer(row.legacy_unbound) ?? 0,
+    reserved: integer(row.reserved) ?? 0, settling: integer(row.settling) ?? 0,
     settled: integer(row.settled) ?? 0, failed: integer(row.failed) ?? 0,
   };
   return snapshot;
@@ -168,10 +176,10 @@ export async function distributedPayment(paymentHash: string): Promise<Distribut
   return parseRecordLine(stdout.trim());
 }
 
-export async function reserveDistributedPayment(args: { paymentHash: string; executionId: string; capability: string }) {
+export async function reserveDistributedPayment(args: { paymentHash: string; requestHash: string; executionId: string; capability: string }) {
   await ensureReady();
-  const { stdout } = await run(`WITH ins AS (INSERT INTO missing_x402_payments(payment_hash,execution_id,capability,state) VALUES (:'payment_hash',:'execution_id',:'capability','reserved') ON CONFLICT (payment_hash) DO NOTHING RETURNING *) SELECT row_to_json(ins) FROM ins;`, {
-    payment_hash: args.paymentHash, execution_id: args.executionId, capability: args.capability,
+  const { stdout } = await run(`WITH ins AS (INSERT INTO missing_x402_payments(payment_hash,request_hash,execution_id,capability,state) VALUES (:'payment_hash',:'request_hash',:'execution_id',:'capability','reserved') ON CONFLICT (payment_hash) DO NOTHING RETURNING *) SELECT row_to_json(ins) FROM ins;`, {
+    payment_hash: args.paymentHash, request_hash: args.requestHash, execution_id: args.executionId, capability: args.capability,
   });
   const inserted = parseRecordLine(stdout.trim());
   const prior = inserted ?? await distributedPayment(args.paymentHash);
