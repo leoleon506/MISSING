@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
+import type { ResolveResult, VerifiedRecipe } from "./types.js";
 import { distributedMoneyEnabled, distributedMoneySnapshot } from "./distributedMoney.js";
-import { productionAdmissionEnabled } from "./operationalReadiness.js";
 import { settledReorgMonitorSnapshot } from "./settledReorgMonitor.js";
-import { runDependencyOperation } from "./dependencyBackpressure.js";
 import { x402FinalityPolicy, x402RpcUrl } from "./x402Reconciliation.js";
+import { runDependencyOperation } from "./dependencyBackpressure.js";
 
 export interface X402Requirements {
   scheme: "exact";
@@ -21,8 +21,8 @@ export interface X402PaymentRequired {
   resource: {
     url: string;
     description: string;
-    mimeType: string;
-    serviceName: string;
+    mimeType: "application/json";
+    serviceName: "MISSING";
     tags: string[];
   };
   accepts: X402Requirements[];
@@ -43,31 +43,39 @@ export type ProductionAdmissionReason =
   | "facilitator_idempotency_contract_not_enabled"
   | "distributed_money_not_enabled"
   | "distributed_money_not_ready"
-  | "transactional_response_cache_not_disabled"
+  | "transactional_response_cache_disabled"
   | "finality_policy_not_ready"
-  | "x402_rpc_not_configured"
-  | "settled_reorg_monitor_not_enabled"
-  | "settled_reorg_monitor_not_running"
-  | "settled_reorg_monitor_unhealthy";
+  | "x402_rpc_configured"
+  | "settled_reorg_monitor_enabled"
+  | "settled_reorg_monitor_running"
+  | "settled_reorg_monitor_healthy";
 
-type FacilitatorFetch = typeof fetch;
-let facilitatorFetch: FacilitatorFetch = fetch;
+let facilitatorFetch: typeof fetch = (...args) => globalThis.fetch(...args);
 
-export function configureX402Fetch(value?: FacilitatorFetch) {
-  facilitatorFetch = value ?? fetch;
-}
-
-function env(name: string): string | null {
-  const value = process.env[name]?.trim();
-  return value || null;
+export function configureX402Fetch(fn?: typeof fetch) {
+  facilitatorFetch = fn ?? ((...args) => globalThis.fetch(...args));
 }
 
 export function x402Enabled(): boolean {
   return process.env.MISSING_X402_ENABLED === "1";
 }
 
+export function productionAdmissionEnabled(): boolean {
+  return process.env.MISSING_PRODUCTION_ADMISSION_ENABLED === "1";
+}
+
+/**
+ * Explicit operator assertion that the configured facilitator deduplicates
+ * settlement submissions carrying the same MISSING settlement intent.
+ * Merely sending an Idempotency-Key header is not treated as evidence.
+ */
 export function x402FacilitatorIdempotencyEnabled(): boolean {
   return process.env.MISSING_X402_FACILITATOR_IDEMPOTENCY === "1";
+}
+
+function env(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
 }
 
 export function x402Config() {
@@ -120,12 +128,12 @@ export function productionAdmissionSnapshot() {
   if (!checks.facilitator_idempotency_contract) reasons.push("facilitator_idempotency_contract_not_enabled");
   if (!checks.distributed_money_enabled) reasons.push("distributed_money_not_enabled");
   if (!checks.distributed_money_ready) reasons.push("distributed_money_not_ready");
-  if (!checks.transactional_response_cache_disabled) reasons.push("transactional_response_cache_not_disabled");
+  if (!checks.transactional_response_cache_disabled) reasons.push("transactional_response_cache_disabled");
   if (!checks.finality_policy_ready) reasons.push("finality_policy_not_ready");
-  if (!checks.x402_rpc_configured) reasons.push("x402_rpc_not_configured");
-  if (!checks.settled_reorg_monitor_enabled) reasons.push("settled_reorg_monitor_not_enabled");
-  if (!checks.settled_reorg_monitor_running) reasons.push("settled_reorg_monitor_not_running");
-  if (!checks.settled_reorg_monitor_healthy) reasons.push("settled_reorg_monitor_unhealthy");
+  if (!checks.x402_rpc_configured) reasons.push("x402_rpc_configured");
+  if (!checks.settled_reorg_monitor_enabled) reasons.push("settled_reorg_monitor_enabled");
+  if (!checks.settled_reorg_monitor_running) reasons.push("settled_reorg_monitor_running");
+  if (!checks.settled_reorg_monitor_healthy) reasons.push("settled_reorg_monitor_healthy");
 
   return {
     enabled,
@@ -214,10 +222,9 @@ async function facilitatorPost(path: "verify" | "settle", body: unknown, extraHe
       if (!response.ok) throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
       throw new Error(`x402 facilitator ${path} returned invalid JSON`);
     }
-    // x402 facilitators may intentionally return the protocol response shape on
-    // semantic 4xx outcomes. Preserve those bodies for verify/settle callers.
-    // Dependency failures (rate limiting and 5xx) still throw so OR7 backpressure
-    // and circuit-breaking continue to observe the external outage.
+    // x402 facilitators return protocol-shaped JSON for semantic 4xx outcomes.
+    // Preserve those bodies for verify/settle callers, while true dependency
+    // pressure/outages still feed OR7/OR9 backpressure and deadlines.
     if (!response.ok && (response.status === 429 || response.status >= 500)) {
       throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
     }
@@ -261,4 +268,9 @@ export async function settleX402Payment(args: { paymentPayload: unknown; require
 
 export function x402PaymentResponseHeader(settlement: X402Settlement): string {
   return b64url(settlement);
+}
+
+export interface X402ExecutionResult {
+  resolution: ResolveResult;
+  recipe: VerifiedRecipe | null;
 }
