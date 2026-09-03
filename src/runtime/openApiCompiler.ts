@@ -184,7 +184,15 @@ function selectOperation(spec: OpenApiObject, lead: ProviderDiscoveryCandidate):
   return bestOperation(anyGet.length ? anyGet : choices);
 }
 
-function deriveBindings(spec: OpenApiObject, pathItem: any, operation: any) {
+function callerEvidenceCovers(inputName: string, verificationInputs: RuntimeInput[]): boolean {
+  if (verificationInputs.length < 2) return false;
+  return verificationInputs.every(input => {
+    const value = input[inputName];
+    return value !== undefined && value !== null && value !== "" && ["string", "number", "boolean"].includes(typeof value);
+  });
+}
+
+function deriveBindings(spec: OpenApiObject, pathItem: any, operation: any, verificationInputs: RuntimeInput[] = []) {
   const path_bindings: Record<string, string> = {};
   const query_bindings: Record<string, string> = {};
   const parameters: Array<{ input_name: string; parameter: any }> = [];
@@ -201,7 +209,8 @@ function deriveBindings(spec: OpenApiObject, pathItem: any, operation: any) {
     if (param.in !== "path" && param.in !== "query") continue;
     const inputName = slug(param.name, "input");
     safe_descriptors.push({ name: param.name, input_name: inputName, location: "query", required: param.required === true, schema, description });
-    if (param.required !== true && param.in !== "path") continue;
+    const callerBackedOptionalQuery = param.in === "query" && param.required !== true && callerEvidenceCovers(inputName, verificationInputs);
+    if (param.required !== true && param.in !== "path" && !callerBackedOptionalQuery) continue;
     parameters.push({ input_name: inputName, parameter: param });
     if (param.in === "path") path_bindings[param.name] = `$input.${inputName}`;
     else query_bindings[param.name] = `$input.${inputName}`;
@@ -300,7 +309,7 @@ export async function compileOpenApiLead(lead: ProviderDiscoveryCandidate, optio
     };
   }
 
-  const url = deriveBindings(spec, selected.pathItem, selected.operation);
+  const url = deriveBindings(spec, selected.pathItem, selected.operation, options.verificationInputs ?? []);
   const path_bindings = { ...url.path_bindings };
   const query_bindings = { ...url.query_bindings };
   let body_bindings: Record<string, string> | undefined;
