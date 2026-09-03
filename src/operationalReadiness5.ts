@@ -15,6 +15,10 @@ import {
   productionAdmissionSnapshot,
   x402Ready,
 } from "./runtime/x402.js";
+import {
+  configureX402RpcIdentityFetch,
+  refreshX402RpcNetworkIdentity,
+} from "./runtime/x402RpcIdentity.js";
 import { readinessPayload } from "./mcp/http.js";
 
 const BASE_RELEASE = "fa388df6417bc5ab4fadf7a5b21f963a64af08ba";
@@ -53,12 +57,24 @@ const resetPolicy = () => {
   process.env.MISSING_X402_SETTLED_REORG_MONITOR_ENABLED = "1";
 };
 
+configureX402RpcIdentityFetch((async (_url: string | URL | Request, init?: RequestInit) => {
+  const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string };
+  if (body.method !== "eth_chainId") throw new Error(`OR5 unexpected RPC method: ${body.method}`);
+  return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x14a34" }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}) as typeof fetch);
+
 await initializeDistributedMoney();
 await truncateDistributedMoney();
 startSettledX402ReorgMonitor();
 // The monitor marks itself running synchronously; give its first empty audit cycle
 // time to initialize the audit table and prove it has not entered an error state.
 await new Promise(resolve => setTimeout(resolve, 100));
+// Production admission now requires proof that the configured RPC really serves
+// the declared CAIP-2 network. Prime the healthy benchmark boundary explicitly.
+await refreshX402RpcNetworkIdentity();
 
 {
   const admission = productionAdmissionSnapshot();
@@ -187,4 +203,5 @@ console.log(JSON.stringify({ result: evidence.result, base_release: BASE_RELEASE
 await stopSettledX402ReorgMonitor();
 closeDistributedMoney();
 configureX402Fetch();
+configureX402RpcIdentityFetch();
 if (!passed) process.exitCode = 1;

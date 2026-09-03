@@ -9,6 +9,10 @@ import {
 import { handleAgentPaidResolution } from "./runtime/agentPayments.js";
 import { configureX402Fetch } from "./runtime/x402.js";
 import { configureX402RpcFetch } from "./runtime/x402Reconciliation.js";
+import {
+  configureX402RpcIdentityFetch,
+  refreshX402RpcNetworkIdentity,
+} from "./runtime/x402RpcIdentity.js";
 import { startSettledX402ReorgMonitor, stopSettledX402ReorgMonitor } from "./runtime/settledReorgMonitor.js";
 
 const BASE_RELEASE = "5b686a2ee116542ed58d3670980357a26d36395d";
@@ -102,6 +106,17 @@ configureX402Fetch((async (url: string | URL | Request, init?: RequestInit) => {
   throw new Error(`OR6 unexpected facilitator fetch: ${target}`);
 }) as typeof fetch);
 
+// Admission identity is an independent precondition. Keep it healthy throughout
+// OR6 so each scenario can exercise the intended downstream dependency outage.
+configureX402RpcIdentityFetch((async (_url: string | URL | Request, init?: RequestInit) => {
+  const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string };
+  if (body.method !== "eth_chainId") throw new Error(`OR6 unexpected admission RPC method: ${body.method}`);
+  return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x14a34" }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}) as typeof fetch);
+
 let rpcOutage = false;
 let rpcCalls = 0;
 configureX402RpcFetch((async (_url: string | URL | Request, init?: RequestInit) => {
@@ -141,6 +156,7 @@ await initializeDistributedMoney();
 await truncateDistributedMoney();
 startSettledX402ReorgMonitor();
 await sleep(100);
+await refreshX402RpcNetworkIdentity();
 
 // 1. Verification dependency outage must stop before durable reservation/provider work,
 // and traffic must recover when the facilitator returns.
@@ -276,5 +292,6 @@ await stopSettledX402ReorgMonitor();
 closeDistributedMoney();
 configureX402Fetch();
 configureX402RpcFetch();
+configureX402RpcIdentityFetch();
 globalThis.fetch = originalFetch;
 if (!go) process.exitCode = 1;
