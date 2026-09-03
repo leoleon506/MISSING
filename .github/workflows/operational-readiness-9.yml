@@ -1,0 +1,33 @@
+name: Operational Readiness 9 Dependency Deadlines Hung Calls
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-deadlines-hung-calls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Operational dependency deadlines hung-call proof
+        run: npx tsx src/operationalReadiness9.ts
+      - name: Verify OR9 evidence exists
+        run: test -s artifacts/operational-readiness-9-dependency-deadlines-hung-call.json
+      - name: Upload OR9 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-readiness-9-dependency-deadlines-hung-call
+          path: artifacts/operational-readiness-9-dependency-deadlines-hung-call.json

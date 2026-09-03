@@ -111,11 +111,12 @@ async function rpc(method: string, params: unknown[]): Promise<{ ok: true; resul
   const url = x402RpcUrl();
   if (!url) return { ok: false, reason: "rpc_not_configured" };
   try {
-    const result = await runDependencyOperation("rpc", async () => {
+    const result = await runDependencyOperation("rpc", async signal => {
       const response = await rpcFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal,
       });
       if (!response.ok) throw new Error(`rpc_http_${response.status}`);
       const body = await response.json() as any;
