@@ -1,5 +1,6 @@
 import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, type SupplyOpportunity } from "./acquisition.js";
 import { compileOpenApiLead, type OpenApiCompileResult } from "./openApiCompiler.js";
+import { demandVerificationInputs } from "./discovery.js";
 import { discoverProviderCandidates, type ProviderDiscoveryCandidate } from "./providerDiscovery.js";
 import { acquireSafePostCandidate, safePostReplayEnabled } from "./safePostReplay.js";
 import { isSupplyIntentBlocked, recordSupplyBlock } from "./supplyBlockLedger.js";
@@ -65,7 +66,12 @@ export async function runThetaOrchestrator(options: {
     return { status: "no_candidates", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: "No provider candidates matched the top unresolved demand" };
   }
 
-  const compileFn = options.compileFn ?? (lead => compileOpenApiLead(lead));
+  const callerInputs = demandVerificationInputs(opportunity.normalized_intent, opportunity.requested_capability, 2);
+  if (callerInputs.length >= 2) trace.push({ stage: "opportunity", status: "caller_evidence_ready", detail: String(callerInputs.length) });
+  const compileFn = options.compileFn ?? (lead => compileOpenApiLead(lead, {
+    capability: opportunity.requested_capability ?? undefined,
+    verificationInputs: callerInputs.length >= 2 ? callerInputs : undefined,
+  }));
   const acquireFn = options.acquireFn ?? acquireVerifiedSupplyCandidate;
   const safePostAcquireFn = options.safePostAcquireFn ?? acquireSafePostCandidate;
   let evidenceReason: string | null = null;
