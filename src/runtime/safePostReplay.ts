@@ -1,4 +1,5 @@
 import { promoteSupplyVerification, recipeFromSupplyCandidate, validateSupplyCandidateUrl, type SupplyCandidate, type SupplyVerification, type SupplyVerificationRun } from "./acquisition.js";
+import { normalizeIntent } from "./discovery.js";
 import { attemptRecipe } from "./executor.js";
 import type { SafePostVerificationAssessment } from "./safePostPolicy.js";
 import type { GeneratedHeaderBinding, SafePostReplayEvidence } from "./types.js";
@@ -140,6 +141,9 @@ export async function acquireSafePostCandidate(
   if (verification.status !== "verified") {
     return { status: "rejected" as const, verification, promotion: { promoted: false, reason: verification.reason, recipe: null } };
   }
-  const promotion = promoteSupplyVerification(verification);
+  const promotion = promoteSupplyVerification(verification, {
+    demand_intent: candidate.demand_intent,
+    normalized_intent: normalizeIntent(candidate.demand_intent),
+  });
   return { status: promotion.promoted ? "promoted" as const : "already_registered" as const, verification, promotion };
 }
