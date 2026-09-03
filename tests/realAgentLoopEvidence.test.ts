@@ -5,6 +5,7 @@ import type { SupplyLedgerEvent } from "../src/runtime/supplyLedger.js";
 import type { VerifiedRecipe } from "../src/runtime/types.js";
 
 const fingerprint = "f".repeat(64);
+const valueNetwork = "eip155:8453";
 const recipe: VerifiedRecipe = {
   capability: "paid_loop_test",
   family: "test",
@@ -54,6 +55,7 @@ function paid(index: number, requestHash = String(index).repeat(64)): RealAgentL
     created_at: `2026-09-02T10:0${2 + index}:00.000Z`,
     updated_at: `2026-09-02T10:0${3 + index}:00.000Z`,
     transaction_reference: `tx-${index}`,
+    network: valueNetwork,
     customer_price_microusd: 3000,
     provider_cost_microusd: 1000,
     gross_margin_microusd: 2000,
@@ -61,9 +63,11 @@ function paid(index: number, requestHash = String(index).repeat(64)): RealAgentL
   };
 }
 
+const base = { demands: [demand], promotions: [promotion], valueNetworks: [valueNetwork] };
+
 describe("Real Agent Loop paid closed-loop evidence", () => {
-  it("qualifies one externally demanded promotion reused by two distinct profitable payments", () => {
-    const result = evaluateRealAgentPaidClosedLoop({ demands: [demand], promotions: [promotion], payments: [paid(1), paid(2)] });
+  it("qualifies one externally demanded promotion reused by two distinct profitable mainnet payments", () => {
+    const result = evaluateRealAgentPaidClosedLoop({ ...base, payments: [paid(1), paid(2)] });
     expect(result.qualified).toBe(true);
     expect(Object.values(result.assertions).every(Boolean)).toBe(true);
     expect(result.evidence.paid_resolutions).toHaveLength(2);
@@ -71,27 +75,38 @@ describe("Real Agent Loop paid closed-loop evidence", () => {
 
   it("rejects two payments that replay the same bound request", () => {
     const first = paid(1);
-    const result = evaluateRealAgentPaidClosedLoop({ demands: [demand], promotions: [promotion], payments: [first, paid(2, first.request_hash!)] });
+    const result = evaluateRealAgentPaidClosedLoop({ ...base, payments: [first, paid(2, first.request_hash!)] });
     expect(result.qualified).toBe(false);
     expect(result.assertions.distinct_request_hashes).toBe(false);
   });
 
   it("rejects a promotion without durable demand origin", () => {
-    const result = evaluateRealAgentPaidClosedLoop({ demands: [demand], promotions: [{ ...promotion, origin: undefined }], payments: [paid(1), paid(2)] });
+    const result = evaluateRealAgentPaidClosedLoop({
+      demands: [demand], promotions: [{ ...promotion, origin: undefined }], payments: [paid(1), paid(2)], valueNetworks: [valueNetwork],
+    });
     expect(result.qualified).toBe(false);
   });
 
   it("rejects nonpositive realized margin", () => {
     const second = { ...paid(2), customer_price_microusd: 1000, provider_cost_microusd: 1000, gross_margin_microusd: 0 };
-    const result = evaluateRealAgentPaidClosedLoop({ demands: [demand], promotions: [promotion], payments: [paid(1), second] });
+    const result = evaluateRealAgentPaidClosedLoop({ ...base, payments: [paid(1), second] });
     expect(result.qualified).toBe(false);
     expect(result.assertions.positive_margin_each_resolution).toBe(false);
   });
 
   it("rejects payments that happened before the promotion", () => {
     const first = { ...paid(1), updated_at: "2026-09-02T10:01:30.000Z" };
-    const result = evaluateRealAgentPaidClosedLoop({ demands: [demand], promotions: [promotion], payments: [first, paid(2)] });
+    const result = evaluateRealAgentPaidClosedLoop({ ...base, payments: [first, paid(2)] });
     expect(result.qualified).toBe(false);
     expect(result.assertions.two_settled_paid_resolutions_after_promotion).toBe(false);
+  });
+
+  it("rejects settled testnet payments from the commercial proof", () => {
+    const result = evaluateRealAgentPaidClosedLoop({
+      ...base,
+      payments: [{ ...paid(1), network: "eip155:84532" }, { ...paid(2), network: "eip155:84532" }],
+    });
+    expect(result.qualified).toBe(false);
+    expect(result.assertions.value_bearing_network_each_resolution).toBe(false);
   });
 });
