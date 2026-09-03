@@ -1,5 +1,6 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import express, { type Request as ExpressRequest, type Response as ExpressResponse } from "express";
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import { pathToFileURL } from "node:url";
 import { mountA2A } from "../a2a/server.js";
@@ -17,7 +18,7 @@ import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { safePostReplayEnabled } from "../runtime/safePostReplay.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
 import { settledReorgMonitorSnapshot, startSettledX402ReorgMonitor, stopSettledX402ReorgMonitor } from "../runtime/settledReorgMonitor.js";
-import { supplyLedgerPath } from "../runtime/supplyLedger.js";
+import { supplyLedgerPath, withSupplyPromotionProvenance } from "../runtime/supplyLedger.js";
 import { productionAdmissionEnabled, productionAdmissionSnapshot } from "../runtime/x402.js";
 import { refreshX402RpcNetworkIdentity } from "../runtime/x402RpcIdentity.js";
 import { reconcileSettledX402Telemetry } from "../runtime/x402TelemetryReconciliation.js";
@@ -137,8 +138,12 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
       return;
     }
     try {
-      const result = await runThetaOrchestrator(controlPlaneCycleOptions());
-      res.status(200).json(result);
+      const controlPlaneRunId = randomUUID();
+      const result = await withSupplyPromotionProvenance({
+        acquisition_path: "trusted_control_plane",
+        control_plane_run_id: controlPlaneRunId,
+      }, () => runThetaOrchestrator(controlPlaneCycleOptions()));
+      res.status(200).json({ ...result, control_plane_run_id: controlPlaneRunId });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       process.stderr.write(`control-plane acquisition failed: ${message}\n`);

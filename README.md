@@ -44,7 +44,7 @@ MISSING currently includes:
 - provider-readiness diagnostics and durable blocker/backoff handling;
 - explicit provider economics, margin-aware routing, and metering;
 - an autonomous agent payment endpoint using x402;
-- shared PostgreSQL financial authority for multi-replica exclusion, crash recovery, settlement reconciliation, lease fencing, request binding, exact on-chain settlement proof, finality/reorg monitoring, dependency backpressure, and abortable deadlines.
+- shared PostgreSQL financial authority for multi-replica exclusion, crash recovery, settlement reconciliation, lease fencing, request binding, exact on-chain settlement proof, finality/reorg monitoring, dependency backpressure, abortable deadlines, RPC-chain identity admission, and telemetry reconciliation.
 
 Historical experiments and formal operational gates remain in the repository as evidence, but they are no longer the product description.
 
@@ -80,27 +80,21 @@ A discovered provider lead cannot become executable merely because its documenta
 
 Paid execution also fails closed around authoritative payment state. A successful provider call alone is not customer revenue; revenue is recognized only after settlement succeeds.
 
-## Current phase: Real Agent Loop
+## Current phase: Real Agent Loop 2
 
-The Kappa.5 correctness track and Operational Readiness 1–9 established the money/recovery and single-process dependency-safety envelope needed to stop spending the project primarily on hypothetical infrastructure failure modes.
+Kappa.5 and Operational Readiness 1–9 established the money/recovery and dependency-safety envelope. Real Agent Loop 1 then crossed the first live commercial boundary: production emitted `GO_REAL_AGENT_PAID_CLOSED_LOOP` from two distinct settled Base-mainnet payments reusing the same demand-derived promoted recipe with positive realized margin.
 
-The current objective is now commercial falsification:
+The current uncertainty is no longer whether the loop can happen once. It is whether MISSING can reproduce the commercial loop autonomously across independent capabilities:
 
-> Can one real external-agent demand create verified supply that is then reused by two different paid agent requests with positive realized margin?
+> Can at least two different external-agent demands each be selected by the trusted control plane, autonomously become replay-verified promoted supply, and each generate repeated positive-margin paid reuse?
 
-`REAL_AGENT_LOOP_1.md` defines the exact proof contract.
+`REAL_AGENT_LOOP_2.md` defines the preregistered proof contract.
 
-CI can only emit:
+Qualifying RAL2 promotions carry durable trusted-control-plane provenance (`acquisition_path` plus `control_plane_run_id`) so direct/manual promotion cannot be confused with autonomous acquisition evidence.
 
-`READY_REAL_AGENT_PAID_CLOSED_LOOP_PROOF`
+CI may validate the proof machinery but cannot claim the live commercial outcome. Only production ledgers plus real settled PostgreSQL rows on approved value networks may eventually emit:
 
-It is explicitly forbidden from claiming the live commercial result.
-
-Only production demand/supply ledgers plus real settled rows in the shared PostgreSQL money authority may emit:
-
-`GO_REAL_AGENT_PAID_CLOSED_LOOP`
-
-Until that happens, the business loop is not considered proven.
+`GO_AUTONOMOUS_COMMERCIAL_REPLICATION`
 
 ## Tests
 

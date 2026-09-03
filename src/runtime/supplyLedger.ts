@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { demandLedgerPath } from "./demandLedger.js";
@@ -6,6 +7,20 @@ import type { CredentialBinding, GeneratedHeaderBinding, VerifiedRecipe } from "
 export interface SupplyPromotionOrigin {
   demand_intent: string;
   normalized_intent: string;
+  acquisition_path?: "trusted_control_plane";
+  control_plane_run_id?: string;
+}
+
+type PromotionProvenance = Pick<SupplyPromotionOrigin, "acquisition_path" | "control_plane_run_id">;
+const promotionProvenance = new AsyncLocalStorage<PromotionProvenance>();
+
+export function withSupplyPromotionProvenance<T>(provenance: PromotionProvenance, fn: () => Promise<T>): Promise<T> {
+  if (provenance.acquisition_path !== "trusted_control_plane") throw new Error("Unsupported acquisition_path");
+  if (!provenance.control_plane_run_id?.trim()) throw new Error("control_plane_run_id is required");
+  return promotionProvenance.run({
+    acquisition_path: "trusted_control_plane",
+    control_plane_run_id: provenance.control_plane_run_id.trim(),
+  }, fn);
 }
 
 export interface SupplyLedgerEvent {
@@ -84,8 +99,15 @@ function isVerifiedRecipe(value: unknown): value is VerifiedRecipe {
 function validOrigin(value: unknown): value is SupplyPromotionOrigin {
   if (!value || typeof value !== "object") return false;
   const origin = value as Partial<SupplyPromotionOrigin>;
-  return typeof origin.demand_intent === "string" && Boolean(origin.demand_intent.trim())
-    && typeof origin.normalized_intent === "string" && Boolean(origin.normalized_intent.trim());
+  if (typeof origin.demand_intent !== "string" || !origin.demand_intent.trim()) return false;
+  if (typeof origin.normalized_intent !== "string" || !origin.normalized_intent.trim()) return false;
+  const hasPath = origin.acquisition_path !== undefined;
+  const hasRun = origin.control_plane_run_id !== undefined;
+  if (hasPath !== hasRun) return false;
+  if (!hasPath) return true;
+  return origin.acquisition_path === "trusted_control_plane"
+    && typeof origin.control_plane_run_id === "string"
+    && Boolean(origin.control_plane_run_id.trim());
 }
 
 export function appendPromotedRecipe(
@@ -96,11 +118,15 @@ export function appendPromotedRecipe(
   const path = supplyLedgerPath();
   if (!path) return;
   mkdirSync(dirname(path), { recursive: true });
+  const provenance = promotionProvenance.getStore();
+  const resolvedOrigin = origin
+    ? { ...origin, ...(provenance ?? {}) }
+    : origin;
   const event: SupplyLedgerEvent = {
     version: 1,
     promoted_at: promotedAt,
     recipe,
-    ...(origin ? { origin } : {}),
+    ...(resolvedOrigin ? { origin: resolvedOrigin } : {}),
   };
   appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8");
 }
