@@ -18,7 +18,8 @@ import { safePostReplayEnabled } from "../runtime/safePostReplay.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
 import { settledReorgMonitorSnapshot, startSettledX402ReorgMonitor, stopSettledX402ReorgMonitor } from "../runtime/settledReorgMonitor.js";
 import { supplyLedgerPath } from "../runtime/supplyLedger.js";
-import { productionAdmissionSnapshot } from "../runtime/x402.js";
+import { productionAdmissionEnabled, productionAdmissionSnapshot } from "../runtime/x402.js";
+import { refreshX402RpcNetworkIdentity } from "../runtime/x402RpcIdentity.js";
 import { createProductServer } from "./server.js";
 
 export const productMcpHandler = createMcpHandler(() => createProductServer());
@@ -94,6 +95,11 @@ export function readinessPayload(baseUrl: string) {
   };
 }
 
+async function refreshProductionRpcIdentity() {
+  if (!productionAdmissionEnabled()) return;
+  await refreshX402RpcNetworkIdentity();
+}
+
 async function nodeRequestToWeb(req: IncomingMessage): Promise<Request> {
   const host = req.headers.host ?? "127.0.0.1";
   const url = new URL(req.url ?? "/", `http://${host}`);
@@ -143,6 +149,7 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
 
   app.post("/v1/agent/resolve", express.json({ limit: "64kb" }), async (req: ExpressRequest, res: ExpressResponse) => {
     try {
+      await refreshProductionRpcIdentity();
       const resourceUrl = `${baseUrl.replace(/\/$/, "")}/v1/agent/resolve`;
       const result = await handleAgentPaidResolution({ request: req.body, paymentSignature: req.get("PAYMENT-SIGNATURE"), resourceUrl });
       if (result.headers) for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
@@ -163,7 +170,8 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
   });
 
   app.get("/livez", (_req, res) => res.status(200).json({ status: "live" }));
-  app.get("/readyz", (_req, res) => {
+  app.get("/readyz", async (_req, res) => {
+    try { await refreshProductionRpcIdentity(); } catch { /* snapshot remains fail-closed */ }
     const payload = readinessPayload(baseUrl);
     res.status(payload.status === "ready" ? 200 : 503).json(payload);
   });
@@ -184,6 +192,7 @@ export async function serveHttp() {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Invalid PORT: ${process.env.PORT}`);
   if (distributedMoneyEnabled()) await initializeDistributedMoney();
   startSettledX402ReorgMonitor();
+  try { await refreshProductionRpcIdentity(); } catch { /* readiness will expose failure */ }
   const resolvedPublicBaseUrl = publicBaseUrl(port, host);
   const server = createServer(createProductHttpApp(resolvedPublicBaseUrl));
 
