@@ -215,8 +215,20 @@ async function facilitatorPost(path: "verify" | "settle", body: unknown, extraHe
       body: JSON.stringify(body),
       signal,
     });
-    if (!response.ok) throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
-    return response.json();
+    let parsed: any = null;
+    try {
+      parsed = await response.json();
+    } catch {
+      if (!response.ok) throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
+      throw new Error(`x402 facilitator ${path} returned invalid JSON`);
+    }
+    // x402 facilitators return protocol-shaped JSON for semantic 4xx outcomes.
+    // Preserve those bodies for verify/settle callers, while true dependency
+    // pressure/outages still feed OR7/OR9 backpressure and deadlines.
+    if (!response.ok && (response.status === 429 || response.status >= 500)) {
+      throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
+    }
+    return parsed;
   });
 }
 
@@ -243,7 +255,6 @@ export async function settleX402Payment(args: { paymentPayload: unknown; require
     x402Version: 2,
     paymentPayload: args.paymentPayload,
     paymentRequirements: args.requirements,
-    ...(idempotent ? { extensions: { missingSettlementIntentId: intent } } : {}),
   }, idempotent && intent ? { "Idempotency-Key": intent, "X-MISSING-Settlement-Intent": intent } : {});
   return {
     success: result?.success === true,

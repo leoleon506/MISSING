@@ -108,12 +108,14 @@ describe("Product Kappa.5.12 verified idempotency contracts", () => {
     expect(calls).toBe(0);
   });
 
-  it("replays a durable settlement intent only when the facilitator contract is explicitly enabled", async () => {
+  it("replays the canonical x402 body with the same durable Idempotency-Key", async () => {
     process.env.MISSING_X402_FACILITATOR_URL = "https://facilitator.test";
     process.env.MISSING_X402_FACILITATOR_IDEMPOTENCY = "1";
     const keys: string[] = [];
+    const bodies: unknown[] = [];
     configureX402Fetch((async (_input: string | URL | Request, init?: RequestInit) => {
       keys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
+      bodies.push(JSON.parse(String(init?.body)) as unknown);
       return new Response(JSON.stringify({ success: true, transaction: "0xsame", network: requirements.network }), { status: 200 });
     }) as typeof fetch);
 
@@ -122,7 +124,51 @@ describe("Product Kappa.5.12 verified idempotency contracts", () => {
 
     expect(x402FacilitatorIdempotencyEnabled()).toBe(true);
     expect(keys).toEqual(["intent-1", "intent-1"]);
+    expect(bodies).toEqual([
+      { x402Version: 2, paymentPayload: { payment: "p" }, paymentRequirements: requirements },
+      { x402Version: 2, paymentPayload: { payment: "p" }, paymentRequirements: requirements },
+    ]);
     expect(first.transaction).toBe("0xsame");
     expect(second.transaction).toBe(first.transaction);
+  });
+
+  it("preserves a structured semantic non-2xx settlement outcome for recovery", async () => {
+    process.env.MISSING_X402_FACILITATOR_URL = "https://facilitator.test";
+    process.env.MISSING_X402_FACILITATOR_IDEMPOTENCY = "1";
+    configureX402Fetch((async () => new Response(JSON.stringify({
+      success: false,
+      errorReason: "duplicate_settlement",
+      errorMessage: "settlement is still being reconciled",
+      transaction: "0xpending",
+      network: requirements.network,
+    }), { status: 409, headers: { "content-type": "application/json" } })) as typeof fetch);
+
+    const result = await settleX402Payment({
+      paymentPayload: { payment: "p" },
+      requirements,
+      settlementIntentId: "intent-1",
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      errorReason: "duplicate_settlement",
+      transaction: "0xpending",
+      network: requirements.network,
+    });
+  });
+
+  it("still throws dependency failures so backpressure can observe facilitator outages", async () => {
+    process.env.MISSING_X402_FACILITATOR_URL = "https://facilitator.test";
+    process.env.MISSING_X402_FACILITATOR_IDEMPOTENCY = "1";
+    configureX402Fetch((async () => new Response(JSON.stringify({
+      success: false,
+      errorReason: "internal_error",
+    }), { status: 503, headers: { "content-type": "application/json" } })) as typeof fetch);
+
+    await expect(settleX402Payment({
+      paymentPayload: { payment: "p" },
+      requirements,
+      settlementIntentId: "intent-1",
+    })).rejects.toThrow("failed with HTTP 503");
   });
 });
