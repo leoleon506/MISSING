@@ -3,10 +3,16 @@ import { dirname, join, resolve } from "node:path";
 import { demandLedgerPath } from "./demandLedger.js";
 import type { CredentialBinding, GeneratedHeaderBinding, VerifiedRecipe } from "./types.js";
 
+export interface SupplyPromotionOrigin {
+  demand_intent: string;
+  normalized_intent: string;
+}
+
 export interface SupplyLedgerEvent {
   version: 1;
   promoted_at: string;
   recipe: VerifiedRecipe;
+  origin?: SupplyPromotionOrigin;
 }
 
 let overridePath: string | null | undefined;
@@ -75,28 +81,50 @@ function isVerifiedRecipe(value: unknown): value is VerifiedRecipe {
     && recipe.verification.status === "replay_verified";
 }
 
-export function appendPromotedRecipe(recipe: VerifiedRecipe, promotedAt = new Date().toISOString()) {
+function validOrigin(value: unknown): value is SupplyPromotionOrigin {
+  if (!value || typeof value !== "object") return false;
+  const origin = value as Partial<SupplyPromotionOrigin>;
+  return typeof origin.demand_intent === "string" && Boolean(origin.demand_intent.trim())
+    && typeof origin.normalized_intent === "string" && Boolean(origin.normalized_intent.trim());
+}
+
+export function appendPromotedRecipe(
+  recipe: VerifiedRecipe,
+  promotedAt = new Date().toISOString(),
+  origin?: SupplyPromotionOrigin,
+) {
   const path = supplyLedgerPath();
   if (!path) return;
   mkdirSync(dirname(path), { recursive: true });
-  const event: SupplyLedgerEvent = { version: 1, promoted_at: promotedAt, recipe };
+  const event: SupplyLedgerEvent = {
+    version: 1,
+    promoted_at: promotedAt,
+    recipe,
+    ...(origin ? { origin } : {}),
+  };
   appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8");
 }
 
-export function readPromotedRecipes(): VerifiedRecipe[] {
+export function readSupplyLedgerEvents(): SupplyLedgerEvent[] {
   const path = supplyLedgerPath();
   if (!path || !existsSync(path)) return [];
-  const recipes = new Map<string, VerifiedRecipe>();
+  const events: SupplyLedgerEvent[] = [];
   for (const line of readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean)) {
     try {
       const event = JSON.parse(line) as Partial<SupplyLedgerEvent>;
-      if (event.version === 1 && typeof event.promoted_at === "string" && isVerifiedRecipe(event.recipe)) {
-        recipes.set(event.recipe.recipe_fingerprint, event.recipe);
-      }
+      if (event.version !== 1 || typeof event.promoted_at !== "string" || !isVerifiedRecipe(event.recipe)) continue;
+      if (event.origin !== undefined && !validOrigin(event.origin)) continue;
+      events.push(event as SupplyLedgerEvent);
     } catch {
       // A malformed historical line must not make the product runtime unavailable.
     }
   }
+  return events;
+}
+
+export function readPromotedRecipes(): VerifiedRecipe[] {
+  const recipes = new Map<string, VerifiedRecipe>();
+  for (const event of readSupplyLedgerEvents()) recipes.set(event.recipe.recipe_fingerprint, event.recipe);
   return [...recipes.values()];
 }
 
