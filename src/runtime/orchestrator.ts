@@ -28,10 +28,28 @@ export function thetaOrchestratorEnabled(): boolean {
   return process.env.MISSING_THETA_ORCHESTRATOR_ENABLED === "1";
 }
 
+type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 type DiscoverFn = (opportunity: SupplyOpportunity, options?: { limit?: number; directoryUrl?: string }) => Promise<ProviderDiscoveryCandidate[]>;
 type CompileFn = (lead: ProviderDiscoveryCandidate) => Promise<OpenApiCompileResult>;
 type AcquireFn = typeof acquireVerifiedSupplyCandidate;
 type SafePostAcquireFn = typeof acquireSafePostCandidate;
+
+const DEFAULT_CYCLE_TIMEOUT_MS = 8_000;
+const DEFAULT_DEPENDENCY_TIMEOUT_MS = 5_000;
+const DEADLINE_RESERVE_MS = 500;
+
+function boundedMs(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? Math.max(100, Math.min(parsed, 30_000)) : fallback;
+}
+
+function dependencyTimeoutMs() {
+  return boundedMs(process.env.MISSING_ACQUISITION_DEPENDENCY_TIMEOUT_MS, DEFAULT_DEPENDENCY_TIMEOUT_MS);
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export async function runThetaOrchestrator(options: {
   candidateLimit?: number;
@@ -41,7 +59,26 @@ export async function runThetaOrchestrator(options: {
   compileFn?: CompileFn;
   acquireFn?: AcquireFn;
   safePostAcquireFn?: SafePostAcquireFn;
+  dependencyFetchFn?: FetchLike;
 } = {}): Promise<Theta4Result> {
+  const cycleTimeoutMs = boundedMs(options.timeoutMs, DEFAULT_CYCLE_TIMEOUT_MS);
+  const deadlineAt = Date.now() + Math.max(100, cycleTimeoutMs - DEADLINE_RESERVE_MS);
+  const remainingMs = () => Math.max(0, deadlineAt - Date.now());
+  const dependencyBaseFetch = options.dependencyFetchFn ?? fetch;
+  const dependencyFetch: FetchLike = async (input, init) => {
+    const remaining = remainingMs();
+    if (remaining <= 0) throw new Error("Acquisition cycle deadline exhausted before dependency request");
+    const timeout = Math.max(100, Math.min(dependencyTimeoutMs(), remaining));
+    const deadlineSignal = AbortSignal.timeout(timeout);
+    const signal = init?.signal ? AbortSignal.any([init.signal, deadlineSignal]) : deadlineSignal;
+    try {
+      return await dependencyBaseFetch(input, { ...init, signal });
+    } catch (error) {
+      if (deadlineSignal.aborted) throw new Error(`Acquisition dependency timed out after ${timeout} ms`);
+      throw error;
+    }
+  };
+
   const ranked = rankSupplyOpportunities(50);
   const opportunity = ranked.find(item => !isSupplyIntentBlocked(item.normalized_intent)) ?? null;
   const trace: Theta4TraceStep[] = [];
@@ -52,18 +89,37 @@ export async function runThetaOrchestrator(options: {
   }
   trace.push({ stage: "opportunity", status: "selected", detail: opportunity.normalized_intent });
 
-  const discoverFn = options.discoverFn ?? discoverProviderCandidates;
+  const recordBackoff = (reason: string, provider: string | null = null, readiness: { credentials_required?: string[]; response_schema_missing?: boolean } = {}) => {
+    const block = recordSupplyBlock({
+      normalized_intent: opportunity.normalized_intent,
+      intent: opportunity.intent,
+      provider,
+      reason,
+      credentials_required: readiness.credentials_required ?? [],
+      response_schema_missing: readiness.response_schema_missing ?? false,
+    });
+    trace.push({ stage: "opportunity", status: "backoff_recorded", provider: provider ?? undefined, detail: block.retry_after });
+    return block;
+  };
+
+  const discoverFn = options.discoverFn ?? ((item, discoverOptions) => discoverProviderCandidates(item, {
+    ...discoverOptions,
+    fetchFn: dependencyFetch,
+  }));
   let leads: ProviderDiscoveryCandidate[];
   try {
     leads = await discoverFn(opportunity, { limit: options.candidateLimit ?? 5, directoryUrl: options.directoryUrl });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = errorMessage(error);
     trace.push({ stage: "discovery", status: "error", detail: reason });
-    return { status: "no_candidates", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason };
+    const block = recordBackoff(reason);
+    return { status: "no_candidates", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: `${reason} Retry after ${block.retry_after}.` };
   }
   trace.push({ stage: "discovery", status: leads.length ? "candidates_found" : "none", detail: String(leads.length) });
   if (!leads.length) {
-    return { status: "no_candidates", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: "No provider candidates matched the top unresolved demand" };
+    const reason = "No provider candidates matched the top unresolved demand";
+    const block = recordBackoff(reason);
+    return { status: "no_candidates", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: `${reason} Retry after ${block.retry_after}.` };
   }
 
   const callerInputs = demandVerificationInputs(opportunity.normalized_intent, opportunity.requested_capability, 2);
@@ -71,6 +127,7 @@ export async function runThetaOrchestrator(options: {
   const compileFn = options.compileFn ?? (lead => compileOpenApiLead(lead, {
     capability: opportunity.requested_capability ?? undefined,
     verificationInputs: callerInputs.length >= 2 ? callerInputs : undefined,
+    fetchFn: dependencyFetch,
   }));
   const acquireFn = options.acquireFn ?? acquireVerifiedSupplyCandidate;
   const safePostAcquireFn = options.safePostAcquireFn ?? acquireSafePostCandidate;
@@ -84,13 +141,20 @@ export async function runThetaOrchestrator(options: {
   let lastRejection: string | null = null;
 
   for (const lead of leads) {
+    if (remainingMs() <= 100) {
+      lastRejection = "Acquisition cycle deadline exhausted before all provider candidates were compiled";
+      trace.push({ stage: "compile", status: "deadline_exhausted", provider: lead.provider, detail: lastRejection });
+      break;
+    }
+
     let compiled: OpenApiCompileResult;
     try {
       compiled = await compileFn(lead);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = errorMessage(error);
       trace.push({ stage: "compile", status: "error", provider: lead.provider, detail });
       lastRejection = detail;
+      if (remainingMs() <= 100) break;
       continue;
     }
 
@@ -125,8 +189,15 @@ export async function runThetaOrchestrator(options: {
           reason: compiled.reason ?? "POST candidate passed the safe replay policy; enable the trusted Lambda.3 verifier to continue",
         };
       }
+      if (remainingMs() <= 100) {
+        lastRejection = "Acquisition cycle deadline exhausted before safe POST replay";
+        trace.push({ stage: "verify_promote", status: "deadline_exhausted", provider: lead.provider, candidate_id: compiled.candidate.candidate_id, detail: lastRejection });
+        break;
+      }
       try {
-        const acquisition = await safePostAcquireFn(compiled.candidate, compiled.safe_post_verification, { timeoutMs: options.timeoutMs });
+        const replayCount = Math.max(1, compiled.candidate.verification_inputs.length);
+        const replayTimeoutMs = Math.max(100, Math.floor(remainingMs() / replayCount));
+        const acquisition = await safePostAcquireFn(compiled.candidate, compiled.safe_post_verification, { timeoutMs: replayTimeoutMs });
         trace.push({
           stage: "verify_promote",
           status: `safe_post_${acquisition.status}`,
@@ -147,7 +218,7 @@ export async function runThetaOrchestrator(options: {
         lastRejection = acquisition.verification.reason ?? acquisition.promotion.reason ?? "Safe POST replay rejected the candidate";
         continue;
       } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
+        const detail = errorMessage(error);
         trace.push({ stage: "verify_promote", status: "safe_post_error", provider: lead.provider, candidate_id: compiled.candidate.candidate_id, detail });
         lastRejection = detail;
         continue;
@@ -172,8 +243,15 @@ export async function runThetaOrchestrator(options: {
       continue;
     }
 
+    if (remainingMs() <= 100) {
+      lastRejection = "Acquisition cycle deadline exhausted before live replay";
+      trace.push({ stage: "verify_promote", status: "deadline_exhausted", provider: lead.provider, candidate_id: compiled.candidate.candidate_id, detail: lastRejection });
+      break;
+    }
     try {
-      const acquisition = await acquireFn(compiled.candidate, { timeoutMs: options.timeoutMs });
+      const replayCount = Math.max(1, compiled.candidate.verification_inputs.length);
+      const replayTimeoutMs = Math.max(100, Math.floor(remainingMs() / replayCount));
+      const acquisition = await acquireFn(compiled.candidate, { timeoutMs: replayTimeoutMs });
       trace.push({
         stage: "verify_promote",
         status: acquisition.status,
@@ -193,22 +271,14 @@ export async function runThetaOrchestrator(options: {
       }
       lastRejection = acquisition.verification.reason ?? acquisition.promotion.reason ?? "Live replay rejected the candidate";
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = errorMessage(error);
       trace.push({ stage: "verify_promote", status: "error", provider: lead.provider, candidate_id: compiled.candidate.candidate_id, detail });
       lastRejection = detail;
     }
   }
 
   if (safeVerificationReason) {
-    const block = recordSupplyBlock({
-      normalized_intent: opportunity.normalized_intent,
-      intent: opportunity.intent,
-      provider: safeVerificationLead?.provider ?? null,
-      reason: safeVerificationReason,
-      credentials_required: [],
-      response_schema_missing: false,
-    });
-    trace.push({ stage: "opportunity", status: "backoff_recorded", provider: safeVerificationLead?.provider, detail: block.retry_after });
+    const block = recordBackoff(safeVerificationReason, safeVerificationLead?.provider ?? null);
     return {
       status: "needs_safe_verification",
       opportunity,
@@ -219,15 +289,7 @@ export async function runThetaOrchestrator(options: {
     };
   }
   if (evidenceReason) {
-    const block = recordSupplyBlock({
-      normalized_intent: opportunity.normalized_intent,
-      intent: opportunity.intent,
-      provider: evidenceLead?.provider ?? null,
-      reason: evidenceReason,
-      credentials_required: [],
-      response_schema_missing: false,
-    });
-    trace.push({ stage: "opportunity", status: "backoff_recorded", provider: evidenceLead?.provider, detail: block.retry_after });
+    const block = recordBackoff(evidenceReason, evidenceLead?.provider ?? null);
     return {
       status: "needs_evidence",
       opportunity,
@@ -239,16 +301,14 @@ export async function runThetaOrchestrator(options: {
   }
   if (providerSetupReason) {
     const readiness = providerSetupResult?.provider_readiness;
-    const block = recordSupplyBlock({
-      normalized_intent: opportunity.normalized_intent,
-      intent: opportunity.intent,
-      provider: providerSetupLead?.provider ?? null,
-      reason: providerSetupReason,
+    const block = recordBackoff(providerSetupReason, providerSetupLead?.provider ?? null, {
       credentials_required: readiness?.credentials_required ?? [],
       response_schema_missing: readiness?.response_schema_missing ?? false,
     });
-    trace.push({ stage: "opportunity", status: "backoff_recorded", provider: providerSetupLead?.provider, detail: block.retry_after });
     return { status: "needs_provider_setup", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: `${providerSetupReason} Retry after ${block.retry_after}.` };
   }
-  return { status: "rejected", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: lastRejection ?? "All discovered provider candidates were rejected" };
+
+  const rejectedReason = lastRejection ?? "All discovered provider candidates were rejected";
+  const block = recordBackoff(rejectedReason);
+  return { status: "rejected", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: `${rejectedReason} Retry after ${block.retry_after}.` };
 }
