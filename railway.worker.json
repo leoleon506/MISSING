@@ -6,10 +6,6 @@
   },
   "deploy": {
     "startCommand": "node dist/src/worker/acquisitionWorker.js",
-    "healthcheckPath": null,
-    "healthcheckTimeout": null,
-    "restartPolicyType": "NEVER",
-    "restartPolicyMaxRetries": null,
     "cronSchedule": "0 * * * *"
   }
 }
