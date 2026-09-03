@@ -43,12 +43,12 @@ export type ProductionAdmissionReason =
   | "facilitator_idempotency_contract_not_enabled"
   | "distributed_money_not_enabled"
   | "distributed_money_not_ready"
-  | "transactional_response_cache_disabled"
+  | "transactional_response_cache_not_disabled"
   | "finality_policy_not_ready"
-  | "x402_rpc_configured"
-  | "settled_reorg_monitor_enabled"
-  | "settled_reorg_monitor_running"
-  | "settled_reorg_monitor_healthy";
+  | "x402_rpc_not_configured"
+  | "settled_reorg_monitor_not_enabled"
+  | "settled_reorg_monitor_not_running"
+  | "settled_reorg_monitor_unhealthy";
 
 let facilitatorFetch: typeof fetch = (...args) => globalThis.fetch(...args);
 
@@ -128,12 +128,12 @@ export function productionAdmissionSnapshot() {
   if (!checks.facilitator_idempotency_contract) reasons.push("facilitator_idempotency_contract_not_enabled");
   if (!checks.distributed_money_enabled) reasons.push("distributed_money_not_enabled");
   if (!checks.distributed_money_ready) reasons.push("distributed_money_not_ready");
-  if (!checks.transactional_response_cache_disabled) reasons.push("transactional_response_cache_disabled");
+  if (!checks.transactional_response_cache_disabled) reasons.push("transactional_response_cache_not_disabled");
   if (!checks.finality_policy_ready) reasons.push("finality_policy_not_ready");
-  if (!checks.x402_rpc_configured) reasons.push("x402_rpc_configured");
-  if (!checks.settled_reorg_monitor_enabled) reasons.push("settled_reorg_monitor_enabled");
-  if (!checks.settled_reorg_monitor_running) reasons.push("settled_reorg_monitor_running");
-  if (!checks.settled_reorg_monitor_healthy) reasons.push("settled_reorg_monitor_healthy");
+  if (!checks.x402_rpc_configured) reasons.push("x402_rpc_not_configured");
+  if (!checks.settled_reorg_monitor_enabled) reasons.push("settled_reorg_monitor_not_enabled");
+  if (!checks.settled_reorg_monitor_running) reasons.push("settled_reorg_monitor_not_running");
+  if (!checks.settled_reorg_monitor_healthy) reasons.push("settled_reorg_monitor_unhealthy");
 
   return {
     enabled,
