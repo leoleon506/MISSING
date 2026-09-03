@@ -160,7 +160,7 @@ export function x402Requirements(customerPriceMicrousd: number): X402Requirement
     asset: c.asset!,
     payTo: c.payTo!,
     maxTimeoutSeconds: c.maxTimeoutSeconds,
-    extra: { name: "USDC", version: "2" },
+    extra: { name: "USD Coin", version: "2" },
   };
 }
 
