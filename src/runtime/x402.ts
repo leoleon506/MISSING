@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import type { ResolveResult, VerifiedRecipe } from "./types.js";
 import { distributedMoneyEnabled, distributedMoneySnapshot } from "./distributedMoney.js";
+import { productionAdmissionEnabled } from "./operationalReadiness.js";
 import { settledReorgMonitorSnapshot } from "./settledReorgMonitor.js";
-import { x402FinalityPolicy, x402RpcUrl } from "./x402Reconciliation.js";
 import { runDependencyOperation } from "./dependencyBackpressure.js";
+import { x402FinalityPolicy, x402RpcUrl } from "./x402Reconciliation.js";
 
 export interface X402Requirements {
   scheme: "exact";
@@ -21,8 +21,8 @@ export interface X402PaymentRequired {
   resource: {
     url: string;
     description: string;
-    mimeType: "application/json";
-    serviceName: "MISSING";
+    mimeType: string;
+    serviceName: string;
     tags: string[];
   };
   accepts: X402Requirements[];
@@ -50,32 +50,24 @@ export type ProductionAdmissionReason =
   | "settled_reorg_monitor_not_running"
   | "settled_reorg_monitor_unhealthy";
 
-let facilitatorFetch: typeof fetch = (...args) => globalThis.fetch(...args);
+type FacilitatorFetch = typeof fetch;
+let facilitatorFetch: FacilitatorFetch = fetch;
 
-export function configureX402Fetch(fn?: typeof fetch) {
-  facilitatorFetch = fn ?? ((...args) => globalThis.fetch(...args));
+export function configureX402Fetch(value?: FacilitatorFetch) {
+  facilitatorFetch = value ?? fetch;
+}
+
+function env(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value || null;
 }
 
 export function x402Enabled(): boolean {
   return process.env.MISSING_X402_ENABLED === "1";
 }
 
-export function productionAdmissionEnabled(): boolean {
-  return process.env.MISSING_PRODUCTION_ADMISSION_ENABLED === "1";
-}
-
-/**
- * Explicit operator assertion that the configured facilitator deduplicates
- * settlement submissions carrying the same MISSING settlement intent.
- * Merely sending an Idempotency-Key header is not treated as evidence.
- */
 export function x402FacilitatorIdempotencyEnabled(): boolean {
   return process.env.MISSING_X402_FACILITATOR_IDEMPOTENCY === "1";
-}
-
-function env(name: string): string | null {
-  const value = process.env[name]?.trim();
-  return value ? value : null;
 }
 
 export function x402Config() {
@@ -215,8 +207,21 @@ async function facilitatorPost(path: "verify" | "settle", body: unknown, extraHe
       body: JSON.stringify(body),
       signal,
     });
-    if (!response.ok) throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
-    return response.json();
+    let parsed: any = null;
+    try {
+      parsed = await response.json();
+    } catch {
+      if (!response.ok) throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
+      throw new Error(`x402 facilitator ${path} returned invalid JSON`);
+    }
+    // x402 facilitators may intentionally return the protocol response shape on
+    // semantic 4xx outcomes. Preserve those bodies for verify/settle callers.
+    // Dependency failures (rate limiting and 5xx) still throw so OR7 backpressure
+    // and circuit-breaking continue to observe the external outage.
+    if (!response.ok && (response.status === 429 || response.status >= 500)) {
+      throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
+    }
+    return parsed;
   });
 }
 
@@ -243,7 +248,6 @@ export async function settleX402Payment(args: { paymentPayload: unknown; require
     x402Version: 2,
     paymentPayload: args.paymentPayload,
     paymentRequirements: args.requirements,
-    ...(idempotent ? { extensions: { missingSettlementIntentId: intent } } : {}),
   }, idempotent && intent ? { "Idempotency-Key": intent, "X-MISSING-Settlement-Intent": intent } : {});
   return {
     success: result?.success === true,
@@ -257,9 +261,4 @@ export async function settleX402Payment(args: { paymentPayload: unknown; require
 
 export function x402PaymentResponseHeader(settlement: X402Settlement): string {
   return b64url(settlement);
-}
-
-export interface X402ExecutionResult {
-  resolution: ResolveResult;
-  recipe: VerifiedRecipe | null;
 }
