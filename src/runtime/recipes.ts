@@ -1,5 +1,5 @@
 import type { RuntimeInput, VerifiedRecipe } from "./types.js";
-import { appendPromotedRecipe, readPromotedRecipes } from "./supplyLedger.js";
+import { appendPromotedRecipe, readPromotedRecipes, type SupplyPromotionOrigin } from "./supplyLedger.js";
 
 const verified = (recipe: Omit<VerifiedRecipe, "verification">): VerifiedRecipe => ({
   ...recipe,
@@ -94,10 +94,10 @@ export const VERIFIED_RECIPES: VerifiedRecipe[] = [...BASE_VERIFIED_RECIPES, ...
 
 export const recipesForCapability = (capability: string) => VERIFIED_RECIPES.filter(r => r.capability === capability);
 
-export function registerPromotedRecipe(recipe: VerifiedRecipe): { added: boolean; recipe: VerifiedRecipe } {
+export function registerPromotedRecipe(recipe: VerifiedRecipe, origin?: SupplyPromotionOrigin): { added: boolean; recipe: VerifiedRecipe } {
   const existing = VERIFIED_RECIPES.find(item => item.recipe_fingerprint === recipe.recipe_fingerprint);
   if (existing) return { added: false, recipe: existing };
-  appendPromotedRecipe(recipe);
+  appendPromotedRecipe(recipe, new Date().toISOString(), origin);
   VERIFIED_RECIPES.push(recipe);
   return { added: true, recipe };
 }
