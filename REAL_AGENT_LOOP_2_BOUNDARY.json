@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "milestone": "Real Agent Loop 2 - Autonomous Commercial Replication",
+  "production_deployed_merge_sha": "7c7cc3afd5652920e1fe277e7e77847bd8601fe7",
+  "boundary_recorded_at_utc": "2026-09-03T19:19:07Z",
+  "production_runtime": "https://missing-production-e3da.up.railway.app",
+  "evidence_rule": "Only demand, promotion, and payment evidence with authoritative timestamps strictly after boundary_recorded_at_utc may qualify for RAL2.",
+  "historical_ral1_evidence_eligible": false
+}
