@@ -190,13 +190,22 @@ export async function runThetaOrchestrator(options: {
   }
 
   if (safeVerificationReason) {
+    const block = recordSupplyBlock({
+      normalized_intent: opportunity.normalized_intent,
+      intent: opportunity.intent,
+      provider: safeVerificationLead?.provider ?? null,
+      reason: safeVerificationReason,
+      credentials_required: [],
+      response_schema_missing: false,
+    });
+    trace.push({ stage: "opportunity", status: "backoff_recorded", provider: safeVerificationLead?.provider, detail: block.retry_after });
     return {
       status: "needs_safe_verification",
       opportunity,
       selected_provider: safeVerificationLead?.provider ?? null,
       recipe_fingerprint: null,
       trace,
-      reason: safeVerificationReason,
+      reason: `${safeVerificationReason} Retry after ${block.retry_after}.`,
     };
   }
   if (sawNeedsEvidence) {
