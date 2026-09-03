@@ -20,6 +20,7 @@ import { settledReorgMonitorSnapshot, startSettledX402ReorgMonitor, stopSettledX
 import { supplyLedgerPath } from "../runtime/supplyLedger.js";
 import { productionAdmissionEnabled, productionAdmissionSnapshot } from "../runtime/x402.js";
 import { refreshX402RpcNetworkIdentity } from "../runtime/x402RpcIdentity.js";
+import { reconcileSettledX402Telemetry } from "../runtime/x402TelemetryReconciliation.js";
 import { createProductServer } from "./server.js";
 
 export const productMcpHandler = createMcpHandler(() => createProductServer());
@@ -190,7 +191,13 @@ export async function serveHttp() {
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? "127.0.0.1";
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Invalid PORT: ${process.env.PORT}`);
-  if (distributedMoneyEnabled()) await initializeDistributedMoney();
+  if (distributedMoneyEnabled()) {
+    await initializeDistributedMoney();
+    const telemetry = await reconcileSettledX402Telemetry();
+    if (telemetry.recorded > 0 || telemetry.error) {
+      process.stdout.write(`MISSING x402 telemetry reconciliation ${JSON.stringify(telemetry)}\n`);
+    }
+  }
   startSettledX402ReorgMonitor();
   try { await refreshProductionRpcIdentity(); } catch { /* readiness will expose failure */ }
   const resolvedPublicBaseUrl = publicBaseUrl(port, host);
