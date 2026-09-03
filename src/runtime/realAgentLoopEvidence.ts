@@ -10,6 +10,7 @@ export interface RealAgentLoopPaymentEvidence {
   created_at: string;
   updated_at: string;
   transaction_reference: string | null;
+  network: string | null;
   customer_price_microusd: number | null;
   provider_cost_microusd: number | null;
   gross_margin_microusd: number | null;
@@ -23,6 +24,7 @@ export interface RealAgentLoopAssertions {
   same_promoted_recipe_reused: boolean;
   distinct_request_hashes: boolean;
   distinct_payments_and_settlements: boolean;
+  value_bearing_network_each_resolution: boolean;
   positive_margin_each_resolution: boolean;
   single_promotion_for_recipe: boolean;
 }
@@ -77,13 +79,31 @@ function validPaidPair(a: RealAgentLoopPaymentEvidence, b: RealAgentLoopPaymentE
   );
 }
 
-function bestPaidPair(payments: RealAgentLoopPaymentEvidence[]): RealAgentLoopPaymentEvidence[] {
+function onValueNetwork(payment: RealAgentLoopPaymentEvidence, valueNetworks: Set<string>): boolean {
+  return payment.network !== null && valueNetworks.has(payment.network);
+}
+
+function pairScore(a: RealAgentLoopPaymentEvidence, b: RealAgentLoopPaymentEvidence, valueNetworks: Set<string>): number {
+  let score = 0;
+  if (validPaidPair(a, b)) score += 4;
+  if (positiveMargin(a) && positiveMargin(b)) score += 2;
+  if (onValueNetwork(a, valueNetworks) && onValueNetwork(b, valueNetworks)) score += 2;
+  return score;
+}
+
+function bestPaidPair(payments: RealAgentLoopPaymentEvidence[], valueNetworks: Set<string>): RealAgentLoopPaymentEvidence[] {
+  let best: RealAgentLoopPaymentEvidence[] = payments.slice(0, 2);
+  let bestScore = best.length === 2 ? pairScore(best[0], best[1], valueNetworks) : -1;
   for (let i = 0; i < payments.length; i += 1) {
     for (let j = i + 1; j < payments.length; j += 1) {
-      if (validPaidPair(payments[i], payments[j])) return [payments[i], payments[j]];
+      const score = pairScore(payments[i], payments[j], valueNetworks);
+      if (score > bestScore) {
+        best = [payments[i], payments[j]];
+        bestScore = score;
+      }
     }
   }
-  return payments.slice(0, 2);
+  return best;
 }
 
 function emptyAssertions(): RealAgentLoopAssertions {
@@ -94,6 +114,7 @@ function emptyAssertions(): RealAgentLoopAssertions {
     same_promoted_recipe_reused: false,
     distinct_request_hashes: false,
     distinct_payments_and_settlements: false,
+    value_bearing_network_each_resolution: false,
     positive_margin_each_resolution: false,
     single_promotion_for_recipe: false,
   };
@@ -107,7 +128,9 @@ export function evaluateRealAgentPaidClosedLoop(args: {
   demands: DemandLedgerEvent[];
   promotions: SupplyLedgerEvent[];
   payments: RealAgentLoopPaymentEvidence[];
+  valueNetworks: string[];
 }): RealAgentLoopEvaluation {
+  const valueNetworks = new Set(args.valueNetworks.filter(Boolean));
   let best: RealAgentLoopEvaluation = {
     qualified: false,
     assertions: emptyAssertions(),
@@ -127,7 +150,7 @@ export function evaluateRealAgentPaidClosedLoop(args: {
     const eligiblePayments = args.payments
       .filter(payment => paidAfterPromotion(payment, promotion))
       .sort((a, b) => a.updated_at.localeCompare(b.updated_at));
-    const pair = bestPaidPair(eligiblePayments);
+    const pair = bestPaidPair(eligiblePayments, valueNetworks);
     const singlePromotion = args.promotions.filter(item => item.recipe.recipe_fingerprint === promotion.recipe.recipe_fingerprint).length === 1;
 
     const assertions: RealAgentLoopAssertions = {
@@ -139,6 +162,7 @@ export function evaluateRealAgentPaidClosedLoop(args: {
       same_promoted_recipe_reused: pair.length >= 2 && pair.every(payment => payment.provider_recipe_fingerprint === promotion.recipe.recipe_fingerprint && payment.capability === promotion.recipe.capability),
       distinct_request_hashes: pair.length >= 2 && Boolean(pair[0].request_hash && pair[1].request_hash && pair[0].request_hash !== pair[1].request_hash),
       distinct_payments_and_settlements: pair.length >= 2 && validPaidPair(pair[0], pair[1]),
+      value_bearing_network_each_resolution: pair.length >= 2 && valueNetworks.size > 0 && pair.every(payment => onValueNetwork(payment, valueNetworks)),
       positive_margin_each_resolution: pair.length >= 2 && pair.every(positiveMargin),
       single_promotion_for_recipe: singlePromotion,
     };
