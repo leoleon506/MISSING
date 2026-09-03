@@ -1,0 +1,40 @@
+name: Real Agent Loop 1 Paid Closed Loop Readiness
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  paid-closed-loop-readiness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: TypeScript build
+        run: npm run build
+      - name: Synthetic causal-proof readiness gate
+        run: npx tsx src/realAgentLoop1Readiness.ts
+      - name: Verify readiness evidence exists
+        run: test -s artifacts/real-agent-loop-1-readiness.json
+      - name: Ensure CI never emits live GO
+        run: |
+          if grep -q '"result": "GO_REAL_AGENT_PAID_CLOSED_LOOP"' artifacts/real-agent-loop-1-readiness.json; then
+            echo "Live GO string must never be a CI result" >&2
+            exit 1
+          fi
+          grep -q '"live_go_allowed": false' artifacts/real-agent-loop-1-readiness.json
+      - name: Upload readiness evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-agent-loop-1-paid-closed-loop-readiness
+          path: artifacts/real-agent-loop-1-readiness.json
