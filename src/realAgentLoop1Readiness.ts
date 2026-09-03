@@ -5,8 +5,9 @@ import type { SupplyLedgerEvent } from "./runtime/supplyLedger.js";
 import type { VerifiedRecipe } from "./runtime/types.js";
 
 const ARTIFACT = "artifacts/real-agent-loop-1-readiness.json";
-const BASE_RELEASE = "14dbbf0ee8c8dcf7b64d1eae42b79db6d8d80cde";
+const BASE_RELEASE = "ab6d3dac829f43115a06044e65546e8a7a743300";
 const FINGERPRINT = "a".repeat(64);
+const VALUE_NETWORK = "eip155:8453";
 
 const recipe: VerifiedRecipe = {
   capability: "sample_live_capability",
@@ -60,6 +61,7 @@ function payment(index: number, requestHash: string, margin = 2000): RealAgentLo
     created_at: `2026-09-02T10:0${2 + index}:00.000Z`,
     updated_at: `2026-09-02T10:0${3 + index}:00.000Z`,
     transaction_reference: `0x${String(index).repeat(64)}`,
+    network: VALUE_NETWORK,
     customer_price_microusd: 3000,
     provider_cost_microusd: 1000,
     gross_margin_microusd: margin,
@@ -70,19 +72,23 @@ function payment(index: number, requestHash: string, margin = 2000): RealAgentLo
 async function main() {
   const paid1 = payment(1, "1".repeat(64));
   const paid2 = payment(2, "2".repeat(64));
-  const positive = evaluateRealAgentPaidClosedLoop({ demands: [demand], promotions: [promotion], payments: [paid1, paid2] });
+  const base = { demands: [demand], promotions: [promotion], valueNetworks: [VALUE_NETWORK] };
+  const positive = evaluateRealAgentPaidClosedLoop({ ...base, payments: [paid1, paid2] });
 
   const duplicateInput = evaluateRealAgentPaidClosedLoop({
-    demands: [demand], promotions: [promotion], payments: [paid1, { ...paid2, request_hash: paid1.request_hash }],
+    ...base, payments: [paid1, { ...paid2, request_hash: paid1.request_hash }],
   });
   const noOrigin = evaluateRealAgentPaidClosedLoop({
-    demands: [demand], promotions: [{ ...promotion, origin: undefined }], payments: [paid1, paid2],
+    demands: [demand], promotions: [{ ...promotion, origin: undefined }], payments: [paid1, paid2], valueNetworks: [VALUE_NETWORK],
   });
   const zeroMargin = evaluateRealAgentPaidClosedLoop({
-    demands: [demand], promotions: [promotion], payments: [paid1, { ...paid2, customer_price_microusd: 1000, provider_cost_microusd: 1000, gross_margin_microusd: 0 }],
+    ...base, payments: [paid1, { ...paid2, customer_price_microusd: 1000, provider_cost_microusd: 1000, gross_margin_microusd: 0 }],
   });
   const prePromotion = evaluateRealAgentPaidClosedLoop({
-    demands: [demand], promotions: [promotion], payments: [{ ...paid1, updated_at: "2026-09-02T10:01:30.000Z" }, paid2],
+    ...base, payments: [{ ...paid1, updated_at: "2026-09-02T10:01:30.000Z" }, paid2],
+  });
+  const testnet = evaluateRealAgentPaidClosedLoop({
+    ...base, payments: [{ ...paid1, network: "eip155:84532" }, { ...paid2, network: "eip155:84532" }],
   });
 
   const assertions = {
@@ -91,6 +97,7 @@ async function main() {
     unlinked_promotion_does_not_qualify: !noOrigin.qualified,
     nonpositive_margin_does_not_qualify: !zeroMargin.qualified,
     prepromotion_payment_does_not_qualify: !prePromotion.qualified,
+    unapproved_network_does_not_qualify: !testnet.qualified,
     ci_cannot_emit_live_go: true,
   };
   const ready = Object.values(assertions).every(Boolean);
