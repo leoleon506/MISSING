@@ -88,14 +88,14 @@ describe("RAL2 caller input evidence", () => {
       return new Response(JSON.stringify(openApiSpec), { status: 200, headers: { "content-type": "application/json" } });
     };
 
-    let captured: SupplyCandidate | null = null;
+    const captured: SupplyCandidate[] = [];
     const result = await runThetaOrchestrator({
       discoverFn: async opportunity => {
         expect(opportunity.requested_capability).toBe(capability);
         return [lead];
       },
-      acquireFn: (async candidate => {
-        captured = candidate;
+      acquireFn: (async (candidate: SupplyCandidate) => {
+        captured.push(candidate);
         return {
           status: "promoted",
           verification: { recipe_fingerprint: "caller-evidence-fingerprint", reason: null },
@@ -107,8 +107,9 @@ describe("RAL2 caller input evidence", () => {
     expect(result.status).toBe("promoted");
     expect(result.recipe_fingerprint).toBe("caller-evidence-fingerprint");
     expect(result.trace).toContainEqual(expect.objectContaining({ stage: "opportunity", status: "caller_evidence_ready", detail: "2" }));
-    expect(captured?.capability).toBe(capability);
-    expect(captured?.verification_inputs).toEqual([{ code: "CR" }, { code: "JP" }]);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]!.capability).toBe(capability);
+    expect(captured[0]!.verification_inputs).toEqual([{ code: "CR" }, { code: "JP" }]);
   });
 
   it("rejects sensitive caller input instead of persisting it", () => {
