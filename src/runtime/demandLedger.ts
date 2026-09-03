@@ -2,6 +2,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, resolve } from "node:path";
 
 export type DemandSource = "mcp" | "a2a" | "runtime" | "unknown" | string;
+export type DemandExampleScalar = string | number | boolean;
+export type DemandExampleInput = Record<string, DemandExampleScalar>;
 
 export interface DemandLedgerEvent {
   version: 1;
@@ -10,9 +12,45 @@ export interface DemandLedgerEvent {
   normalized_intent: string;
   capability: string | null;
   source: DemandSource;
+  example_input?: DemandExampleInput;
 }
 
 let overridePath: string | null | undefined;
+
+const SENSITIVE_INPUT_KEYS = new Set([
+  "authorization", "bearer", "cookie", "password", "passwd", "secret", "token", "accesstoken", "refreshtoken",
+  "apikey", "privatekey", "clientsecret", "seed", "mnemonic", "credential", "credentials",
+]);
+
+function normalizedInputKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+export function sanitizeDemandExampleInput(value: unknown): DemandExampleInput | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (!entries.length || entries.length > 16) return null;
+  const result: DemandExampleInput = {};
+  for (const [key, raw] of entries) {
+    if (!key.trim() || key.length > 64 || SENSITIVE_INPUT_KEYS.has(normalizedInputKey(key))) return null;
+    if (typeof raw === "string") {
+      if (!raw.length || raw.length > 512) return null;
+      result[key] = raw;
+      continue;
+    }
+    if (typeof raw === "number") {
+      if (!Number.isFinite(raw)) return null;
+      result[key] = raw;
+      continue;
+    }
+    if (typeof raw === "boolean") {
+      result[key] = raw;
+      continue;
+    }
+    return null;
+  }
+  return JSON.stringify(result).length <= 4096 ? result : null;
+}
 
 export function demandLedgerPath(): string | null {
   if (overridePath !== undefined) return overridePath;
@@ -48,7 +86,16 @@ export function readDemandEvents(): DemandLedgerEvent[] {
         (typeof value.capability === "string" || value.capability === null) &&
         typeof value.source === "string"
       ) {
-        events.push(value as DemandLedgerEvent);
+        const exampleInput = value.example_input === undefined ? null : sanitizeDemandExampleInput(value.example_input);
+        events.push({
+          version: 1,
+          observed_at: value.observed_at,
+          intent: value.intent,
+          normalized_intent: value.normalized_intent,
+          capability: value.capability,
+          source: value.source,
+          ...(exampleInput ? { example_input: exampleInput } : {}),
+        });
       }
     } catch {
       // Ignore malformed historical lines rather than making the runtime unavailable.

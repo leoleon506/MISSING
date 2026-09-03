@@ -1,4 +1,4 @@
-import { appendDemandEvent, readDemandEvents, truncateDemandLedger, type DemandSource } from "./demandLedger.js";
+import { appendDemandEvent, readDemandEvents, sanitizeDemandExampleInput, truncateDemandLedger, type DemandExampleInput, type DemandSource } from "./demandLedger.js";
 import { VERIFIED_RECIPES } from "./recipes.js";
 
 export interface DemandObservation {
@@ -10,6 +10,7 @@ export interface DemandObservation {
   last_seen_at: string;
   sources: Record<string, number>;
   examples: string[];
+  example_inputs: DemandExampleInput[];
 }
 
 export interface CapabilitySearchResult {
@@ -51,12 +52,19 @@ function demandKey(normalized: string, capability: string | null) {
   return `${capability ?? "unknown"}::${normalized}`;
 }
 
+function addExampleInput(target: DemandExampleInput[], value: DemandExampleInput | undefined) {
+  if (!value || target.length >= 10) return;
+  const serialized = JSON.stringify(value);
+  if (!target.some(item => JSON.stringify(item) === serialized)) target.push(structuredClone(value));
+}
+
 function applyDemandEvent(event: {
   intent: string;
   normalized_intent: string;
   capability: string | null;
   observed_at: string;
   source: DemandSource;
+  example_input?: DemandExampleInput;
 }) {
   const key = demandKey(event.normalized_intent, event.capability);
   const existing = demand.get(key);
@@ -66,6 +74,7 @@ function applyDemandEvent(event: {
     if (event.observed_at > existing.last_seen_at) existing.last_seen_at = event.observed_at;
     existing.sources[event.source] = (existing.sources[event.source] ?? 0) + 1;
     if (!existing.examples.includes(event.intent) && existing.examples.length < 5) existing.examples.push(event.intent);
+    addExampleInput(existing.example_inputs, event.example_input);
     return existing;
   }
   const created: DemandObservation = {
@@ -77,7 +86,9 @@ function applyDemandEvent(event: {
     last_seen_at: event.observed_at,
     sources: { [event.source]: 1 },
     examples: [event.intent],
+    example_inputs: [],
   };
+  addExampleInput(created.example_inputs, event.example_input);
   demand.set(key, created);
   return created;
 }
@@ -92,10 +103,17 @@ function terms(value: string): string[] {
   return [...new Set(normalizeIntent(value).split(" ").filter(token => token.length > 1 && !STOPWORDS.has(token)))];
 }
 
-export function recordDemand(intent: string, capability: string | null = null, source: DemandSource = "unknown"): DemandObservation {
+export function recordDemand(
+  intent: string,
+  capability: string | null = null,
+  source: DemandSource = "unknown",
+  exampleInput?: Record<string, unknown> | null,
+): DemandObservation {
   ensureHydrated();
   const normalized = normalizeIntent(intent);
   if (!normalized) throw new Error("intent must contain searchable text");
+  const sanitized = exampleInput === undefined || exampleInput === null ? null : sanitizeDemandExampleInput(exampleInput);
+  if (exampleInput !== undefined && exampleInput !== null && !sanitized) throw new Error("example_input must be a small non-sensitive flat scalar object");
   const now = new Date().toISOString();
   const event = {
     version: 1 as const,
@@ -104,6 +122,7 @@ export function recordDemand(intent: string, capability: string | null = null, s
     normalized_intent: normalized,
     capability,
     source,
+    ...(sanitized ? { example_input: sanitized } : {}),
   };
   appendDemandEvent(event);
   return structuredClone(applyDemandEvent(event));
@@ -114,6 +133,12 @@ export function demandSnapshot(): DemandObservation[] {
   return [...demand.values()]
     .map(item => structuredClone(item))
     .sort((a, b) => b.count - a.count || b.last_seen_at.localeCompare(a.last_seen_at));
+}
+
+export function demandVerificationInputs(normalizedIntent: string, capability: string | null, limit = 2): DemandExampleInput[] {
+  ensureHydrated();
+  const observation = demand.get(demandKey(normalizedIntent, capability));
+  return observation ? observation.example_inputs.slice(0, Math.max(0, limit)).map(item => structuredClone(item)) : [];
 }
 
 export function demandSummary() {
