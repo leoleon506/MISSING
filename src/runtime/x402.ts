@@ -3,6 +3,7 @@ import type { ResolveResult, VerifiedRecipe } from "./types.js";
 import { distributedMoneyEnabled, distributedMoneySnapshot } from "./distributedMoney.js";
 import { settledReorgMonitorSnapshot } from "./settledReorgMonitor.js";
 import { x402FinalityPolicy, x402RpcUrl } from "./x402Reconciliation.js";
+import { x402RpcNetworkIdentitySnapshot } from "./x402RpcIdentity.js";
 import { runDependencyOperation } from "./dependencyBackpressure.js";
 
 export interface X402Requirements {
@@ -46,6 +47,9 @@ export type ProductionAdmissionReason =
   | "transactional_response_cache_not_disabled"
   | "finality_policy_not_ready"
   | "x402_rpc_not_configured"
+  | "x402_rpc_network_not_verified"
+  | "x402_rpc_network_mismatch"
+  | "x402_rpc_network_unavailable"
   | "settled_reorg_monitor_not_enabled"
   | "settled_reorg_monitor_not_running"
   | "settled_reorg_monitor_unhealthy";
@@ -97,12 +101,11 @@ function x402StaticReady(): boolean {
 }
 
 /**
- * Operational Readiness 5 admission contract.
+ * Operational Readiness 5 admission contract, strengthened after RAL1.
  *
- * The gate is opt-in so existing local/test deployments retain their historical
- * behavior. Once enabled, paid traffic fails closed unless every production
- * prerequisite needed by the durable x402 path is already healthy before any
- * payment verification, provider effect, or settlement submission can occur.
+ * Once production admission is enabled, an RPC URL is not sufficient evidence:
+ * its eth_chainId must have been probed for the current network+URL pair and must
+ * match MISSING_X402_NETWORK before paid traffic can proceed.
  */
 export function productionAdmissionSnapshot() {
   const enabled = productionAdmissionEnabled();
@@ -110,6 +113,7 @@ export function productionAdmissionSnapshot() {
   const distributed = distributedMoneySnapshot();
   const monitor = settledReorgMonitorSnapshot();
   const finality = config.network ? x402FinalityPolicy(config.network) : null;
+  const rpcIdentity = x402RpcNetworkIdentitySnapshot(config.network);
   const checks = {
     x402_static_ready: x402StaticReady(),
     facilitator_idempotency_contract: x402FacilitatorIdempotencyEnabled(),
@@ -118,6 +122,7 @@ export function productionAdmissionSnapshot() {
     transactional_response_cache_disabled: !distributed.response_cache_enabled,
     finality_policy_ready: finality?.ok === true,
     x402_rpc_configured: x402RpcUrl() !== null,
+    x402_rpc_network_match: rpcIdentity.state === "match",
     settled_reorg_monitor_enabled: monitor.enabled,
     settled_reorg_monitor_running: monitor.running,
     settled_reorg_monitor_healthy: monitor.last_error === null,
@@ -131,6 +136,9 @@ export function productionAdmissionSnapshot() {
   if (!checks.transactional_response_cache_disabled) reasons.push("transactional_response_cache_not_disabled");
   if (!checks.finality_policy_ready) reasons.push("finality_policy_not_ready");
   if (!checks.x402_rpc_configured) reasons.push("x402_rpc_not_configured");
+  else if (rpcIdentity.state === "unverified") reasons.push("x402_rpc_network_not_verified");
+  else if (rpcIdentity.state === "mismatch") reasons.push("x402_rpc_network_mismatch");
+  else if (rpcIdentity.state === "unavailable") reasons.push("x402_rpc_network_unavailable");
   if (!checks.settled_reorg_monitor_enabled) reasons.push("settled_reorg_monitor_not_enabled");
   if (!checks.settled_reorg_monitor_running) reasons.push("settled_reorg_monitor_not_running");
   if (!checks.settled_reorg_monitor_healthy) reasons.push("settled_reorg_monitor_unhealthy");
@@ -142,6 +150,7 @@ export function productionAdmissionSnapshot() {
     reasons: enabled ? reasons : [],
     checks,
     finality_policy: finality,
+    rpc_network_identity: rpcIdentity,
   };
 }
 
@@ -222,9 +231,6 @@ async function facilitatorPost(path: "verify" | "settle", body: unknown, extraHe
       if (!response.ok) throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
       throw new Error(`x402 facilitator ${path} returned invalid JSON`);
     }
-    // x402 facilitators return protocol-shaped JSON for semantic 4xx outcomes.
-    // Preserve those bodies for verify/settle callers, while true dependency
-    // pressure/outages still feed OR7/OR9 backpressure and deadlines.
     if (!response.ok && (response.status === 429 || response.status >= 500)) {
       throw new Error(`x402 facilitator ${path} failed with HTTP ${response.status}`);
     }
