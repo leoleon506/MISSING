@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
-import { demandSnapshot, type DemandObservation } from "./discovery.js";
+import { demandSnapshot, normalizeIntent, type DemandObservation } from "./discovery.js";
 import { attemptRecipe } from "./executor.js";
 import { recipesForCapability, registerPromotedRecipe } from "./recipes.js";
 import type { GeneratedHeaderBinding, HttpMethod, ProjectionRule, RuntimeAttempt, RuntimeInput, SafePostReplayEvidence, VerifiedRecipe } from "./types.js";
@@ -235,11 +235,14 @@ export async function verifySupplyCandidate(candidate: SupplyCandidate, options:
   };
 }
 
-export function promoteSupplyVerification(verification: SupplyVerification) {
+export function promoteSupplyVerification(
+  verification: SupplyVerification,
+  origin?: { demand_intent: string; normalized_intent: string },
+) {
   if (verification.status !== "verified" || !verification.recipe) {
     return { promoted: false, reason: "Only a successful live replay verification can be promoted", recipe: null };
   }
-  const registered = registerPromotedRecipe(verification.recipe);
+  const registered = registerPromotedRecipe(verification.recipe, origin);
   return {
     promoted: registered.added,
     reason: registered.added ? null : "Recipe fingerprint is already registered",
@@ -252,6 +255,9 @@ export async function acquireVerifiedSupplyCandidate(candidate: SupplyCandidate,
   if (verification.status !== "verified") {
     return { status: "rejected" as const, verification, promotion: { promoted: false, reason: verification.reason, recipe: null } };
   }
-  const promotion = promoteSupplyVerification(verification);
+  const promotion = promoteSupplyVerification(verification, {
+    demand_intent: candidate.demand_intent,
+    normalized_intent: normalizeIntent(candidate.demand_intent),
+  });
   return { status: promotion.promoted ? "promoted" as const : "already_registered" as const, verification, promotion };
 }
