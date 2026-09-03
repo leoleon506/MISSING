@@ -68,7 +68,8 @@ export async function runThetaOrchestrator(options: {
   const compileFn = options.compileFn ?? (lead => compileOpenApiLead(lead));
   const acquireFn = options.acquireFn ?? acquireVerifiedSupplyCandidate;
   const safePostAcquireFn = options.safePostAcquireFn ?? acquireSafePostCandidate;
-  let sawNeedsEvidence = false;
+  let evidenceReason: string | null = null;
+  let evidenceLead: ProviderDiscoveryCandidate | null = null;
   let safeVerificationReason: string | null = null;
   let safeVerificationLead: ProviderDiscoveryCandidate | null = null;
   let providerSetupReason: string | null = null;
@@ -154,7 +155,10 @@ export async function runThetaOrchestrator(options: {
       continue;
     }
     if (compiled.status === "needs_verification_inputs") {
-      sawNeedsEvidence = true;
+      if (!evidenceReason) {
+        evidenceReason = compiled.reason ?? "At least one provider lead compiled but lacked two evidence-backed verification inputs";
+        evidenceLead = lead;
+      }
       continue;
     }
     if (compiled.status !== "candidate_ready" || !compiled.candidate) {
@@ -208,8 +212,24 @@ export async function runThetaOrchestrator(options: {
       reason: `${safeVerificationReason} Retry after ${block.retry_after}.`,
     };
   }
-  if (sawNeedsEvidence) {
-    return { status: "needs_evidence", opportunity, selected_provider: null, recipe_fingerprint: null, trace, reason: "At least one provider lead compiled but lacked two evidence-backed verification inputs" };
+  if (evidenceReason) {
+    const block = recordSupplyBlock({
+      normalized_intent: opportunity.normalized_intent,
+      intent: opportunity.intent,
+      provider: evidenceLead?.provider ?? null,
+      reason: evidenceReason,
+      credentials_required: [],
+      response_schema_missing: false,
+    });
+    trace.push({ stage: "opportunity", status: "backoff_recorded", provider: evidenceLead?.provider, detail: block.retry_after });
+    return {
+      status: "needs_evidence",
+      opportunity,
+      selected_provider: null,
+      recipe_fingerprint: null,
+      trace,
+      reason: `${evidenceReason} Retry after ${block.retry_after}.`,
+    };
   }
   if (providerSetupReason) {
     const readiness = providerSetupResult?.provider_readiness;
