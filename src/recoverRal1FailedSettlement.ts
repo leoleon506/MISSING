@@ -62,7 +62,7 @@ async function main() {
     const grossMargin = row.gross_margin_microusd === null ? null : Number(row.gross_margin_microusd);
     if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error("invalid stored customer price");
     if (providerCost === null || !Number.isSafeInteger(providerCost) || providerCost < 0) throw new Error("recovery requires known non-negative provider cost");
-    if (!Number.isSafeInteger(grossMargin) || grossMargin <= 0 || amount - providerCost !== grossMargin) {
+    if (grossMargin === null || !Number.isSafeInteger(grossMargin) || grossMargin <= 0 || amount - providerCost !== grossMargin) {
       throw new Error("recovery requires internally consistent positive realized margin");
     }
 
