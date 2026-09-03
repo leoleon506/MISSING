@@ -12,7 +12,7 @@ export interface X402TelemetryReconciliationResult {
   error: string | null;
 }
 
-type SettledRow = {
+export type SettledX402TelemetryRow = {
   payment_hash: string;
   transaction_reference: string | null;
   capability: string;
@@ -21,6 +21,13 @@ type SettledRow = {
   provider_cost_microusd: string | number | null;
   provider_recipe_fingerprint: string | null;
 };
+
+type SettledRowsLoader = () => Promise<SettledX402TelemetryRow[]>;
+let settledRowsLoaderOverride: SettledRowsLoader | null = null;
+
+export function configureSettledX402TelemetryRowsForTest(loader?: SettledRowsLoader) {
+  settledRowsLoaderOverride = loader ?? null;
+}
 
 function integer(value: string | number | null): number | null {
   if (value === null) return null;
@@ -46,6 +53,26 @@ function poolConfig() {
   };
 }
 
+async function loadSettledRows(): Promise<SettledX402TelemetryRow[]> {
+  if (settledRowsLoaderOverride) return settledRowsLoaderOverride();
+  const config = poolConfig();
+  if (!config) throw new Error("postgres_not_configured");
+  const pool = new Pool(config);
+  try {
+    const result = await pool.query<SettledX402TelemetryRow>(`
+      SELECT payment_hash, transaction_reference, capability, network,
+             customer_price_microusd, provider_cost_microusd,
+             provider_recipe_fingerprint
+      FROM missing_x402_payments
+      WHERE state='settled'
+      ORDER BY created_at ASC
+    `);
+    return result.rows;
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
+}
+
 /**
  * Reconstruct advisory x402/economics telemetry from the authoritative Postgres
  * payment ledger. This never mutates money state and is idempotent by payment_hash.
@@ -61,24 +88,14 @@ export async function reconcileSettledX402Telemetry(): Promise<X402TelemetryReco
     skipped: 0,
     error: null,
   };
-  if (!distributedMoneyEnabled()) return empty;
-  const config = poolConfig();
-  if (!config) return { ...empty, error: "postgres_not_configured" };
+  if (!distributedMoneyEnabled() && !settledRowsLoaderOverride) return empty;
 
-  const pool = new Pool(config);
   try {
-    const result = await pool.query<SettledRow>(`
-      SELECT payment_hash, transaction_reference, capability, network,
-             customer_price_microusd, provider_cost_microusd,
-             provider_recipe_fingerprint
-      FROM missing_x402_payments
-      WHERE state='settled'
-      ORDER BY created_at ASC
-    `);
+    const rows = await loadSettledRows();
     const existing = new Set(x402Events().map(event => event.payment_hash));
-    const summary = { ...empty, scanned: result.rows.length };
+    const summary = { ...empty, scanned: rows.length };
 
-    for (const row of result.rows) {
+    for (const row of rows) {
       if (existing.has(row.payment_hash)) {
         summary.already_recorded += 1;
         continue;
@@ -112,7 +129,5 @@ export async function reconcileSettledX402Telemetry(): Promise<X402TelemetryReco
     return summary;
   } catch (error) {
     return { ...empty, error: error instanceof Error ? error.message : String(error) };
-  } finally {
-    await pool.end().catch(() => undefined);
   }
 }
