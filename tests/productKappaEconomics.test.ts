@@ -8,11 +8,13 @@ import {
   economicsSnapshot,
   economicsSummary,
   rankRecipesByEconomics,
+  recipeEconomics,
   recordEconomicsResolution,
   truncateEconomicsLedger,
 } from "../src/runtime/economics.js";
 import { resetRuntimeHealth, resolveCapability } from "../src/runtime/executor.js";
 import { recipesForCapability } from "../src/runtime/recipes.js";
+import type { VerifiedRecipe } from "../src/runtime/types.js";
 
 let tempDir: string | null = null;
 
@@ -47,6 +49,34 @@ function configureCountryEconomics(args: {
     },
   });
   return { recipes, warnely, countries };
+}
+
+function discoveredProductLiveRecipe(args: { credentials?: boolean; family?: string; fingerprint?: string } = {}): VerifiedRecipe {
+  return {
+    capability: "sample_discovered_capability",
+    family: args.family ?? "discovered",
+    provider: "Sample Public API",
+    provider_candidate_id: "theta_sample",
+    recipe_fingerprint: args.fingerprint ?? "family-default-fingerprint",
+    method: "GET",
+    base_url: "https://example.test",
+    path_template: "/resource",
+    path_bindings: {},
+    query_bindings: { value: "$input.value" },
+    ...(args.credentials ? {
+      credential_bindings: [{ location: "header", name: "Authorization", credential_key: "sample_token", prefix: "Bearer " }],
+    } : {}),
+    projection: { value: { op: "FIELD", path: "value" } },
+    required: ["value"],
+    example_input: { value: "a" },
+    verification: {
+      status: "replay_verified",
+      source: "product_live",
+      verification_inputs: [{ value: "a" }, { value: "b" }],
+      verified_at: "2026-09-04T00:00:00.000Z",
+      evidence_url: "https://example.test/openapi.json",
+    },
+  };
 }
 
 afterEach(() => {
@@ -101,6 +131,97 @@ describe("Product Kappa economics and metering", () => {
     process.env.MISSING_MIN_MARGIN_MICROUSD = "2000";
 
     expect(rankRecipesByEconomics(recipes).map(recipe => recipe.provider)).toEqual(["countries.dev"]);
+  });
+
+  it("applies an explicit family default to credential-free product-live supply", () => {
+    setup();
+    const recipe = discoveredProductLiveRecipe();
+    process.env.MISSING_ECONOMICS_ENFORCEMENT_ENABLED = "1";
+    process.env.MISSING_MIN_MARGIN_MICROUSD = "1000";
+    process.env.MISSING_ECONOMICS_JSON = JSON.stringify({
+      product_live_family_defaults: {
+        discovered: {
+          provider_cost_microusd: 0,
+          customer_price_microusd: 5000,
+        },
+      },
+    });
+
+    expect(recipeEconomics(recipe)).toEqual({
+      provider_cost_microusd: 0,
+      customer_price_microusd: 5000,
+      margin_microusd: 5000,
+    });
+    expect(rankRecipesByEconomics([recipe])).toEqual([recipe]);
+    expect(economicsSnapshot([recipe]).recipes[0]).toMatchObject({
+      economics_status: "configured",
+      economics_source: "product_live_family_default",
+      eligible: true,
+      provider_cost_microusd: 0,
+      customer_price_microusd: 5000,
+      margin_microusd: 5000,
+    });
+  });
+
+  it("does not apply family defaults to credentialed product-live supply", () => {
+    setup();
+    const recipe = discoveredProductLiveRecipe({ credentials: true });
+    process.env.MISSING_ECONOMICS_ENFORCEMENT_ENABLED = "1";
+    process.env.MISSING_ECONOMICS_JSON = JSON.stringify({
+      product_live_family_defaults: {
+        discovered: {
+          provider_cost_microusd: 0,
+          customer_price_microusd: 5000,
+        },
+      },
+    });
+
+    expect(recipeEconomics(recipe)).toBeNull();
+    expect(rankRecipesByEconomics([recipe])).toEqual([]);
+  });
+
+  it("keeps experiment recipes unknown even when their family has a product-live default", () => {
+    setup();
+    const recipe = recipesForCapability("pokemon_name_metadata")[0]!;
+    process.env.MISSING_ECONOMICS_ENFORCEMENT_ENABLED = "1";
+    process.env.MISSING_ECONOMICS_JSON = JSON.stringify({
+      product_live_family_defaults: {
+        games: {
+          provider_cost_microusd: 0,
+          customer_price_microusd: 5000,
+        },
+      },
+    });
+
+    expect(recipe.verification.source).toBe("experiment");
+    expect(recipeEconomics(recipe)).toBeNull();
+    expect(rankRecipesByEconomics([recipe])).toEqual([]);
+  });
+
+  it("lets exact fingerprint economics override a family default", () => {
+    setup();
+    const recipe = discoveredProductLiveRecipe({ fingerprint: "exact-wins" });
+    process.env.MISSING_ECONOMICS_JSON = JSON.stringify({
+      recipes: {
+        "exact-wins": {
+          provider_cost_microusd: 2000,
+          customer_price_microusd: 9000,
+        },
+      },
+      product_live_family_defaults: {
+        discovered: {
+          provider_cost_microusd: 0,
+          customer_price_microusd: 5000,
+        },
+      },
+    });
+
+    expect(recipeEconomics(recipe)).toEqual({
+      provider_cost_microusd: 2000,
+      customer_price_microusd: 9000,
+      margin_microusd: 7000,
+    });
+    expect(economicsSnapshot([recipe]).recipes[0]?.economics_source).toBe("recipe");
   });
 
   it("persists priced and unknown successful resolution metering", () => {
