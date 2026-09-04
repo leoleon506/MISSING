@@ -8,6 +8,7 @@ import { resolveCapability, runtimeHealth } from "../runtime/executor.js";
 import { creditAccount, prepaidCreditsSnapshot } from "../runtime/prepaidCredits.js";
 import { discoverTopSupplyCandidates, providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
+import { supplyPromotionEvidenceSnapshot } from "../runtime/supplyLedger.js";
 
 const content = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
 const acquisitionDisabled = () => content({ status: "disabled", reason: "Supply verification and promotion are disabled on this public runtime. Enable only on a trusted acquisition worker with MISSING_SUPPLY_ACQUISITION_ENABLED=1." });
@@ -43,6 +44,19 @@ export function registerProductTools(server: McpServer) {
   server.registerTool("verify_supply_candidate", { description: "On a trusted acquisition worker, live-replay a proposed GET provider recipe.", inputSchema: supplyCandidateSchema }, async args => supplyAcquisitionEnabled() ? content(await verifySupplyCandidate(args)) : acquisitionDisabled());
 
   server.registerTool("acquire_verified_supply_candidate", { description: "On a trusted acquisition worker, verify and promote a provider candidate only after replay gates pass.", inputSchema: supplyCandidateSchema }, async args => supplyAcquisitionEnabled() ? content(await acquireVerifiedSupplyCandidate(args)) : acquisitionDisabled());
+
+  server.registerTool("missing_supply_promotion_evidence", {
+    description: "Inspect sanitized durable supply-promotion evidence including trusted control-plane provenance without exposing provider URLs, caller inputs, outputs, or credentials.",
+    inputSchema: z.object({
+      capability: z.string().optional(),
+      recipe_fingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    }),
+  }, async args => content({
+    promotions: supplyPromotionEvidenceSnapshot({
+      capability: args.capability,
+      recipeFingerprint: args.recipe_fingerprint,
+    }),
+  }));
 
   server.registerTool("resolve_capability", { description: "Execute a capability using replay-verified provider recipes.", inputSchema: z.object({ capability: z.string(), input: z.record(z.string(), z.unknown()) }) }, async args => content(await resolveCapability(args.capability, args.input)));
 
