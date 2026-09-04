@@ -41,7 +41,7 @@ type APIsGuruDirectory = Record<string, APIsGuruEntry>;
 
 const DEFAULT_DIRECTORY_URL = "https://api.apis.guru/v2/list.json";
 const STOP_WORDS = new Set([
-  "a", "an", "and", "api", "for", "from", "in", "is", "me", "number", "of", "on", "or", "the", "this", "to", "with",
+  "a", "all", "an", "and", "any", "api", "by", "details", "for", "from", "in", "information", "is", "me", "metadata", "number", "of", "on", "or", "the", "this", "to", "with",
   "validate", "validation", "verify", "check", "find", "get", "lookup", "locate",
 ]);
 
@@ -62,6 +62,22 @@ function tokenSet(text: string): Set<string> {
   return new Set(tokens(text));
 }
 
+function tokenMatches(query: string, candidate: string): boolean {
+  if (query === candidate) return true;
+  const shorter = Math.min(query.length, candidate.length);
+  if (shorter < 6) return false;
+  let prefix = 0;
+  while (prefix < shorter && query[prefix] === candidate[prefix]) prefix += 1;
+  return prefix >= 5 && prefix / shorter >= 0.8;
+}
+
+function setMatches(term: string, values: Set<string>): boolean {
+  for (const value of values) {
+    if (tokenMatches(term, value)) return true;
+  }
+  return false;
+}
+
 function selectedVersion(entry: APIsGuruEntry): APIsGuruVersion | null {
   const versions = entry.versions ?? {};
   if (entry.preferred && versions[entry.preferred]) return versions[entry.preferred];
@@ -77,16 +93,15 @@ function scoreCandidate(directoryId: string, version: APIsGuruVersion, opportuni
   const idTokens = tokenSet(directoryId);
   const descriptionTokens = tokenSet(description);
   const identityTokens = new Set([...titleTokens, ...idTokens]);
-  const allTokens = new Set([...identityTokens, ...descriptionTokens]);
-  const matched = queryTerms.filter(term => allTokens.has(term));
-  const identityMatches = matched.filter(term => identityTokens.has(term));
-  const descriptionOnlyMatches = matched.filter(term => !identityTokens.has(term) && descriptionTokens.has(term));
+  const matched = queryTerms.filter(term => setMatches(term, identityTokens) || setMatches(term, descriptionTokens));
+  const identityMatches = matched.filter(term => setMatches(term, identityTokens));
+  const descriptionOnlyMatches = matched.filter(term => !setMatches(term, identityTokens) && setMatches(term, descriptionTokens));
   const relevant = identityMatches.length > 0 || descriptionOnlyMatches.length >= 2;
   const coverage = queryTerms.length ? matched.length / queryTerms.length : 0;
-  const titleMatches = matched.filter(term => titleTokens.has(term)).length;
-  const idMatches = matched.filter(term => idTokens.has(term)).length;
+  const titleMatches = matched.filter(term => setMatches(term, titleTokens)).length;
+  const idMatches = matched.filter(term => setMatches(term, idTokens)).length;
   const score = relevant
-    ? coverage * 0.7 + Math.min(titleMatches, 3) * 0.08 + Math.min(idMatches, 2) * 0.03
+    ? coverage * 0.7 + Math.min(titleMatches, 3) * 0.12 + Math.min(idMatches, 2) * 0.05
     : 0;
   return {
     score: Number(Math.min(1, score).toFixed(4)),
