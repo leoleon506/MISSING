@@ -29,11 +29,26 @@ export interface EconomicsSummary {
   gross_margin_microusd: number;
 }
 
+type EconomicsRule = {
+  provider_cost_microusd?: unknown;
+  customer_price_microusd?: unknown;
+};
+
 type EconomicsConfig = {
-  recipes?: Record<string, {
-    provider_cost_microusd?: unknown;
-    customer_price_microusd?: unknown;
-  }>;
+  recipes?: Record<string, EconomicsRule>;
+  /**
+   * Optional product policy for replay-verified supply discovered at runtime.
+   * This fallback is intentionally narrower than recipe-specific pricing:
+   * it applies only to product_live recipes with no credential bindings.
+   * Exact fingerprint pricing always wins.
+   */
+  product_live_family_defaults?: Record<string, EconomicsRule>;
+};
+
+type EconomicsSource = "recipe" | "product_live_family_default";
+
+type ResolvedRecipeEconomics = RecipeEconomics & {
+  source: EconomicsSource;
 };
 
 let overrideLedgerPath: string | null | undefined;
@@ -53,6 +68,34 @@ function parsedConfig(): EconomicsConfig {
   }
 }
 
+function resolvedRuleEconomics(rule: EconomicsRule | undefined, source: EconomicsSource): ResolvedRecipeEconomics | null {
+  if (!rule) return null;
+  const cost = rule.provider_cost_microusd;
+  const price = rule.customer_price_microusd;
+  if (!validMoney(cost) || !validMoney(price) || price < cost) return null;
+  return {
+    provider_cost_microusd: cost,
+    customer_price_microusd: price,
+    margin_microusd: price - cost,
+    source,
+  };
+}
+
+function resolveRecipeEconomics(recipe: VerifiedRecipe): ResolvedRecipeEconomics | null {
+  const config = parsedConfig();
+  const exact = resolvedRuleEconomics(config.recipes?.[recipe.recipe_fingerprint], "recipe");
+  if (exact) return exact;
+
+  const eligibleForFamilyDefault = recipe.verification.source === "product_live"
+    && (recipe.credential_bindings?.length ?? 0) === 0;
+  if (!eligibleForFamilyDefault) return null;
+
+  return resolvedRuleEconomics(
+    config.product_live_family_defaults?.[recipe.family],
+    "product_live_family_default",
+  );
+}
+
 export function economicsEnforcementEnabled(): boolean {
   return process.env.MISSING_ECONOMICS_ENFORCEMENT_ENABLED === "1";
 }
@@ -63,15 +106,12 @@ export function economicsMinMarginMicrousd(): number {
 }
 
 export function recipeEconomics(recipe: VerifiedRecipe): RecipeEconomics | null {
-  const configured = parsedConfig().recipes?.[recipe.recipe_fingerprint];
-  if (!configured) return null;
-  const cost = configured.provider_cost_microusd;
-  const price = configured.customer_price_microusd;
-  if (!validMoney(cost) || !validMoney(price) || price < cost) return null;
+  const resolved = resolveRecipeEconomics(recipe);
+  if (!resolved) return null;
   return {
-    provider_cost_microusd: cost,
-    customer_price_microusd: price,
-    margin_microusd: price - cost,
+    provider_cost_microusd: resolved.provider_cost_microusd,
+    customer_price_microusd: resolved.customer_price_microusd,
+    margin_microusd: resolved.margin_microusd,
   };
 }
 
@@ -84,6 +124,8 @@ export function recipeEconomicallyEligible(recipe: VerifiedRecipe): boolean {
 /**
  * Kappa never treats missing pricing as zero cost. When enforcement is enabled,
  * unknown or below-margin recipes are removed from the executable candidate set.
+ * Product-live family defaults are explicit operator policy, not inferred pricing,
+ * and only apply to replay-verified recipes that require no credentials.
  * Within eligible supply, higher explicit margin is preferred; registry/AgentRank
  * order is the stable tie breaker supplied by the caller.
  */
@@ -190,12 +232,20 @@ export function economicsSnapshot(recipes: VerifiedRecipe[], capability?: string
     minimum_margin_microusd: economicsMinMarginMicrousd(),
     ledger_persistence: economicsLedgerPath() !== null,
     recipes: selected.map(recipe => {
-      const economics = recipeEconomics(recipe);
+      const resolved = resolveRecipeEconomics(recipe);
+      const economics = resolved
+        ? {
+            provider_cost_microusd: resolved.provider_cost_microusd,
+            customer_price_microusd: resolved.customer_price_microusd,
+            margin_microusd: resolved.margin_microusd,
+          }
+        : null;
       return {
         capability: recipe.capability,
         provider: recipe.provider,
         recipe_fingerprint: recipe.recipe_fingerprint,
         economics_status: economics ? "configured" : "unknown",
+        economics_source: resolved?.source ?? null,
         eligible: recipeEconomicallyEligible(recipe),
         ...(economics ?? {
           provider_cost_microusd: null,
