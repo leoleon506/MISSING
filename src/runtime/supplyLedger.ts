@@ -30,6 +30,18 @@ export interface SupplyLedgerEvent {
   origin?: SupplyPromotionOrigin;
 }
 
+export interface SupplyPromotionEvidence {
+  promoted_at: string;
+  capability: string;
+  family: string;
+  provider: string;
+  recipe_fingerprint: string;
+  verification_source: string | null;
+  verification_input_count: number;
+  verified_at: string | null;
+  origin: SupplyPromotionOrigin | null;
+}
+
 let overridePath: string | null | undefined;
 
 export function supplyLedgerPath(): string | null {
@@ -146,6 +158,31 @@ export function readSupplyLedgerEvents(): SupplyLedgerEvent[] {
     }
   }
   return events;
+}
+
+export function supplyPromotionEvidenceSnapshot(filters: { capability?: string; recipeFingerprint?: string } = {}): SupplyPromotionEvidence[] {
+  return readSupplyLedgerEvents()
+    .filter(event => !filters.capability || event.recipe.capability === filters.capability)
+    .filter(event => !filters.recipeFingerprint || event.recipe.recipe_fingerprint === filters.recipeFingerprint)
+    .map(event => {
+      const verification = event.recipe.verification as VerifiedRecipe["verification"] & {
+        source?: unknown;
+        verification_inputs?: unknown;
+        verified_at?: unknown;
+      };
+      return {
+        promoted_at: event.promoted_at,
+        capability: event.recipe.capability,
+        family: event.recipe.family,
+        provider: event.recipe.provider,
+        recipe_fingerprint: event.recipe.recipe_fingerprint,
+        verification_source: typeof verification.source === "string" ? verification.source : null,
+        verification_input_count: Array.isArray(verification.verification_inputs) ? verification.verification_inputs.length : 0,
+        verified_at: typeof verification.verified_at === "string" ? verification.verified_at : null,
+        origin: event.origin ? structuredClone(event.origin) : null,
+      };
+    })
+    .sort((a, b) => Date.parse(b.promoted_at) - Date.parse(a.promoted_at));
 }
 
 export function readPromotedRecipes(): VerifiedRecipe[] {
