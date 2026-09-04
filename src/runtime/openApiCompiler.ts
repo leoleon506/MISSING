@@ -192,6 +192,17 @@ function callerEvidenceCovers(inputName: string, verificationInputs: RuntimeInpu
   });
 }
 
+function normalizedInputName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function callerBackedInputName(parameterName: string, verificationInputs: RuntimeInput[]): string | null {
+  if (verificationInputs.length < 2) return null;
+  const target = normalizedInputName(parameterName);
+  const candidateKeys = Object.keys(verificationInputs[0] ?? {}).filter(key => normalizedInputName(key) === target);
+  return candidateKeys.find(key => callerEvidenceCovers(key, verificationInputs)) ?? null;
+}
+
 function deriveBindings(spec: OpenApiObject, pathItem: any, operation: any, verificationInputs: RuntimeInput[] = []) {
   const path_bindings: Record<string, string> = {};
   const query_bindings: Record<string, string> = {};
@@ -207,7 +218,7 @@ function deriveBindings(spec: OpenApiObject, pathItem: any, operation: any, veri
       continue;
     }
     if (param.in !== "path" && param.in !== "query") continue;
-    const inputName = slug(param.name, "input");
+    const inputName = callerBackedInputName(param.name, verificationInputs) ?? slug(param.name, "input");
     safe_descriptors.push({ name: param.name, input_name: inputName, location: "query", required: param.required === true, schema, description });
     const callerBackedOptionalQuery = param.in === "query" && param.required !== true && callerEvidenceCovers(inputName, verificationInputs);
     if (param.required !== true && param.in !== "path" && !callerBackedOptionalQuery) continue;
