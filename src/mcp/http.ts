@@ -18,7 +18,7 @@ import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { safePostReplayEnabled } from "../runtime/safePostReplay.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
 import { settledReorgMonitorSnapshot, startSettledX402ReorgMonitor, stopSettledX402ReorgMonitor } from "../runtime/settledReorgMonitor.js";
-import { supplyLedgerPath, withSupplyPromotionProvenance } from "../runtime/supplyLedger.js";
+import { supplyLedgerPath, supplyPromotionEvidenceSnapshot, withSupplyPromotionProvenance } from "../runtime/supplyLedger.js";
 import { productionAdmissionEnabled, productionAdmissionSnapshot } from "../runtime/x402.js";
 import { refreshX402RpcNetworkIdentity } from "../runtime/x402RpcIdentity.js";
 import { reconcileSettledX402Telemetry } from "../runtime/x402TelemetryReconciliation.js";
@@ -164,6 +164,24 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
       process.stderr.write(`agent payment request failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
       res.status(500).json({ error: "internal_error" });
     }
+  });
+
+  app.get("/v1/evidence/supply-promotion/:capability", (req: ExpressRequest, res: ExpressResponse) => {
+    const capability = String(req.params.capability ?? "");
+    if (!/^[a-z][a-z0-9_]*$/.test(capability)) {
+      res.status(400).json({ error: "invalid_capability" });
+      return;
+    }
+    const rawFingerprint = req.query.recipe_fingerprint;
+    if (rawFingerprint !== undefined && (typeof rawFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(rawFingerprint))) {
+      res.status(400).json({ error: "invalid_recipe_fingerprint" });
+      return;
+    }
+    const evidence = supplyPromotionEvidenceSnapshot({
+      capability,
+      ...(typeof rawFingerprint === "string" ? { recipeFingerprint: rawFingerprint } : {}),
+    });
+    res.status(200).json({ evidence });
   });
 
   app.all("/mcp", async (req: ExpressRequest, res: ExpressResponse) => {
