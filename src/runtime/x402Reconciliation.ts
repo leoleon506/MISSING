@@ -164,6 +164,7 @@ function safeConfirmations(latest: bigint, included: bigint): number | null {
 }
 
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const MAX_HEAD_READS_WHEN_RECEIPT_AHEAD = 3;
 
 export async function x402SettlementProof(args: {
   transaction: string;
@@ -209,11 +210,16 @@ export async function x402SettlementProof(args: {
   }
   const blockNumberHex = `0x${receiptBlockNumber.toString(16)}`;
 
-  const latestResult = await rpc("eth_blockNumber", []);
-  if (!latestResult.ok) return { state: "unavailable", reason: latestResult.reason, chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, ...policyEvidence };
-  const latestBlock = hexBigInt(latestResult.result);
-  if (latestBlock === null) return { state: "unavailable", reason: "invalid_latest_block_response", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, ...policyEvidence };
-  const confirmations = safeConfirmations(latestBlock, receiptBlockNumber);
+  let latestBlock: bigint | null = null;
+  for (let read = 0; read < MAX_HEAD_READS_WHEN_RECEIPT_AHEAD; read += 1) {
+    const latestResult = await rpc("eth_blockNumber", []);
+    if (!latestResult.ok) return { state: "unavailable", reason: latestResult.reason, chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, ...policyEvidence };
+    latestBlock = hexBigInt(latestResult.result);
+    if (latestBlock === null) return { state: "unavailable", reason: "invalid_latest_block_response", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, ...policyEvidence };
+    if (latestBlock >= receiptBlockNumber) break;
+  }
+
+  const confirmations = safeConfirmations(latestBlock!, receiptBlockNumber);
   if (confirmations === null) return { state: "pending", reason: "receipt_block_ahead_of_head", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations: 0, ...policyEvidence };
   if (confirmations < requiredConfirmations) {
     return { state: "pending", reason: "insufficient_confirmations", chain_id: String(actualChain), block_number: blockNumberHex, block_hash: receiptBlockHash, confirmations, ...policyEvidence };
