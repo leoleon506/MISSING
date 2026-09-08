@@ -35,11 +35,13 @@ type Scenario = {
   firstReceipt?: unknown;
   secondReceipt?: unknown;
   latestBlock?: string;
+  latestBlocks?: string[];
   canonicalHash?: string | null;
 };
 
 function rpcScenario(scenario: Scenario = {}) {
   let receiptReads = 0;
+  let blockReads = 0;
   return vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? "{}"));
     if (body.method === "eth_chainId") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x14a34" }), { status: 200 });
@@ -48,7 +50,14 @@ function rpcScenario(scenario: Scenario = {}) {
       const result = receiptReads === 1 ? (scenario.firstReceipt ?? receipt()) : (scenario.secondReceipt === undefined ? (scenario.firstReceipt ?? receipt()) : scenario.secondReceipt);
       return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
     }
-    if (body.method === "eth_blockNumber") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: scenario.latestBlock ?? "0x68" }), { status: 200 });
+    if (body.method === "eth_blockNumber") {
+      const sequence = scenario.latestBlocks;
+      const result = sequence?.length
+        ? sequence[Math.min(blockReads, sequence.length - 1)]
+        : scenario.latestBlock ?? "0x68";
+      blockReads += 1;
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
+    }
     if (body.method === "eth_getBlockByNumber") {
       const result = scenario.canonicalHash === null ? null : { hash: scenario.canonicalHash ?? BLOCK_HASH };
       return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
@@ -96,6 +105,39 @@ describe("Product Kappa.5.5 settlement finality and reorg resistance", () => {
       confirmations: 5,
       required_confirmations: 5,
       finality_policy_source: "legacy_global_env",
+      block_number: "0x64",
+      block_hash: BLOCK_HASH,
+    });
+    expect(rpc).toHaveBeenCalledTimes(5);
+  });
+
+  it("rechecks a transiently stale RPC head before declaring receipt_block_ahead_of_head", async () => {
+    process.env.MISSING_X402_RPC_URL = "https://rpc.test";
+    process.env.MISSING_X402_MIN_CONFIRMATIONS = "5";
+    const rpc = rpcScenario({ latestBlocks: ["0x63", "0x68"] });
+    configureX402RpcFetch(rpc as typeof fetch);
+
+    await expect(prove()).resolves.toMatchObject({
+      state: "verified",
+      confirmations: 5,
+      required_confirmations: 5,
+      block_number: "0x64",
+      block_hash: BLOCK_HASH,
+    });
+    expect(rpc).toHaveBeenCalledTimes(6);
+  });
+
+  it("remains pending when the RPC head stays behind the observed receipt after bounded rechecks", async () => {
+    process.env.MISSING_X402_RPC_URL = "https://rpc.test";
+    process.env.MISSING_X402_MIN_CONFIRMATIONS = "5";
+    const rpc = rpcScenario({ latestBlocks: ["0x63", "0x63", "0x63"] });
+    configureX402RpcFetch(rpc as typeof fetch);
+
+    await expect(prove()).resolves.toMatchObject({
+      state: "pending",
+      reason: "receipt_block_ahead_of_head",
+      confirmations: 0,
+      required_confirmations: 5,
       block_number: "0x64",
       block_hash: BLOCK_HASH,
     });
