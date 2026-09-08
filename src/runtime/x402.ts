@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ResolveResult, VerifiedRecipe } from "./types.js";
-import { distributedMoneyEnabled, distributedMoneySnapshot } from "./distributedMoney.js";
+import { distributedMoneyEnabled, distributedMoneySnapshot, distributedPayment } from "./distributedMoney.js";
 import { settledReorgMonitorSnapshot } from "./settledReorgMonitor.js";
 import { x402FinalityPolicy, x402RpcUrl } from "./x402Reconciliation.js";
 import { x402RpcNetworkIdentitySnapshot } from "./x402RpcIdentity.js";
@@ -241,13 +241,35 @@ async function facilitatorPost(path: "verify" | "settle", body: unknown, extraHe
 export async function verifyX402Payment(args: { paymentSignature: string; requirements: X402Requirements }) {
   const paymentPayload = parseX402PaymentSignature(args.paymentSignature);
   if (!paymentPayload || typeof paymentPayload !== "object") return { valid: false as const, reason: "invalid_payment_signature" };
+
+  const hash = paymentHash(args.paymentSignature);
+
+  // A time-bounded x402 authorization may expire after the facilitator has already
+  // produced and MISSING has durably persisted a settlement transaction. In that
+  // narrow state the authorization cannot create another financial effect: the
+  // only permitted continuation is proof/reconciliation of the known transaction.
+  // The caller still enforces the persisted request_hash binding and acquires the
+  // durable recovery lease/fence before any state mutation.
+  if (distributedMoneyEnabled()) {
+    const prior = await distributedPayment(hash);
+    if (prior?.state === "settling" && prior.transaction_reference) {
+      return {
+        valid: true as const,
+        payer: null,
+        paymentHash: hash,
+        paymentPayload,
+        recovery: "known_settlement" as const,
+      };
+    }
+  }
+
   const result = await facilitatorPost("verify", {
     x402Version: 2,
     paymentPayload,
     paymentRequirements: args.requirements,
   });
   return result?.isValid === true
-    ? { valid: true as const, payer: typeof result.payer === "string" ? result.payer : null, paymentHash: paymentHash(args.paymentSignature), paymentPayload }
+    ? { valid: true as const, payer: typeof result.payer === "string" ? result.payer : null, paymentHash: hash, paymentPayload }
     : { valid: false as const, reason: typeof result?.invalidReason === "string" ? result.invalidReason : "payment_not_valid" };
 }
 
