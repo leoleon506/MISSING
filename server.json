@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.leoleon506/missing",
+  "title": "MISSING",
+  "description": "Fallback capability resolver for AI agents with replay-verified discovery and x402 paid execution.",
+  "repository": {
+    "url": "https://github.com/leoleon506/MISSING",
+    "source": "github"
+  },
+  "version": "0.2.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://missing-production-e3da.up.railway.app/mcp"
+    }
+  ]
+}
