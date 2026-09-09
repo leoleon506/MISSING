@@ -23,9 +23,9 @@ import { supplyLedgerPath, supplyPromotionEvidenceSnapshot, withSupplyPromotionP
 import { productionAdmissionEnabled, productionAdmissionSnapshot } from "../runtime/x402.js";
 import { refreshX402RpcNetworkIdentity } from "../runtime/x402RpcIdentity.js";
 import { reconcileSettledX402Telemetry } from "../runtime/x402TelemetryReconciliation.js";
-import { createProductServer } from "./server.js";
+import { createPublicProductServer } from "./server.js";
 
-export const productMcpHandler = createMcpHandler(() => createProductServer());
+export const productMcpHandler = createMcpHandler(() => createPublicProductServer());
 
 export function publicBaseUrl(port = Number(process.env.PORT ?? 3000), host = process.env.HOST ?? "127.0.0.1"): string {
   if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL.replace(/\/$/, "");
@@ -243,7 +243,7 @@ export async function serveHttp() {
     server.once("error", reject);
     server.listen(port, host, resolve);
   });
-  process.stdout.write(`MISSING remote MCP listening on ${resolvedPublicBaseUrl}/mcp\n`);
+  process.stdout.write(`MISSING public MCP listening on ${resolvedPublicBaseUrl}/mcp\n`);
   process.stdout.write(`MISSING A2A Agent Card on ${resolvedPublicBaseUrl}/.well-known/agent-card.json\n`);
   process.stdout.write(`MISSING x402 paid capability endpoint on ${resolvedPublicBaseUrl}/v1/agent/resolve\n`);
   process.stdout.write(`MISSING sandbox status on ${resolvedPublicBaseUrl}/sandboxz\n`);
