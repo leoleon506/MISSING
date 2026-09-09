@@ -22,19 +22,36 @@ afterEach(() => resetDemand());
 afterAll(async () => productMcpHandler.close());
 
 describe("MISSING Product Delta remote MCP edge", () => {
-  it("connects in-process and discovers the Product Alpha/Beta/Gamma tools", async () => {
+  it("connects in-process and exposes only the anonymous consumer surface", async () => {
     const { client, transport } = clientForHandler();
     await client.connect(transport);
     const tools = await client.listTools();
-    const names = tools.tools.map(tool => tool.name);
-    expect(names).toEqual(expect.arrayContaining([
+    const names = tools.tools.map(tool => tool.name).sort();
+
+    expect(names).toEqual([
       "list_verified_capabilities",
-      "search_verified_capabilities",
-      "resolve_capability",
-      "missing_runtime_health",
       "record_missing_capability_demand",
+      "resolve_capability",
+      "search_verified_capabilities",
+    ]);
+
+    for (const trustedOnly of [
+      "missing_runtime_health",
       "missing_demand_snapshot",
-    ]));
+      "missing_supply_opportunities",
+      "discover_supply_candidates",
+      "verify_supply_candidate",
+      "acquire_verified_supply_candidate",
+      "missing_agent_rank",
+      "missing_economics",
+      "missing_prepaid_credits",
+      "compile_openapi_candidate",
+      "run_supply_acquisition_cycle",
+      "resolve_capability_charged",
+    ]) {
+      expect(names).not.toContain(trustedOnly);
+    }
+
     await client.close();
   });
 
