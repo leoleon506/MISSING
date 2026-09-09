@@ -1,0 +1,15 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": [
+    "leoleon506"
+  ],
+  "keywords": [
+    "ai-agents",
+    "capability-discovery",
+    "fallback",
+    "mcp",
+    "agent-orchestration",
+    "x402",
+    "paid-tools"
+  ]
+}
