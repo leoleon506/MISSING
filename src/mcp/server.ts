@@ -5,14 +5,22 @@ import { loadConfig } from "../config/index.js";
 import { registerChargingTools } from "./charging.js";
 import { registerOpenApiCompilerTool } from "./openApiCompiler.js";
 import { registerThetaOrchestratorTool } from "./orchestrator.js";
-import { registerProductTools } from "./product.js";
+import { registerProductTools, registerPublicProductTools } from "./product.js";
 import { executeNormalTool, fallbackEvent, missingSpecification, toolSpecifications, type InvocationRecorder } from "./tools.js";
 
 export interface BenchmarkServerOptions { includeMissing: boolean; missingDescription: string; missingToolName?: string; recorder?: InvocationRecorder; requestId?: string; caseId?: string; includeProductRuntime?: boolean; }
 const content = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
 
-export function createProductServer(): McpServer {
+/** Anonymous internet-facing MCP surface. */
+export function createPublicProductServer(): McpServer {
   const server = new McpServer({ name: "missing", version: "0.2.0" });
+  registerPublicProductTools(server);
+  return server;
+}
+
+/** Trusted/local operator surface. Never mount this on anonymous HTTP. */
+export function createProductServer(): McpServer {
+  const server = new McpServer({ name: "missing-trusted", version: "0.2.0" });
   registerProductTools(server);
   registerChargingTools(server);
   registerOpenApiCompilerTool(server);
