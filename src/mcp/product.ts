@@ -25,7 +25,13 @@ const supplyCandidateSchema = z.object({
   candidate_id: z.string().min(2), demand_intent: z.string().min(2), capability: z.string().regex(/^[a-z][a-z0-9_]*$/), family: z.string().min(1), provider: z.string().min(1), evidence_url: z.string().url(), method: z.literal("GET"), base_url: z.string().url(), path_template: z.string().min(1), path_bindings: z.record(z.string(), z.string()), query_bindings: z.record(z.string(), z.string()), projection: z.record(z.string(), projectionRuleSchema), required: z.array(z.string().min(1)).min(1), verification_inputs: z.array(z.record(z.string(), z.unknown())).min(2),
 });
 
-export function registerProductTools(server: McpServer) {
+/**
+ * Anonymous/public MCP surface. Keep this intentionally small: consumers may
+ * discover executable supply, record unresolved demand, and use the current
+ * resolution path. Commercial paid-only execution is enforced in a separate
+ * launch gate so this trust-boundary change remains independently reviewable.
+ */
+export function registerPublicProductTools(server: McpServer) {
   server.registerTool("list_verified_capabilities", { description: "List capabilities currently executable by the MISSING product runtime using replay-verified provider recipes.", inputSchema: z.object({}) }, async () => content({ capabilities: VERIFIED_RECIPES.map(recipe => ({ capability: recipe.capability, family: recipe.family, provider: recipe.provider, example_input: recipe.example_input })) }));
 
   server.registerTool("search_verified_capabilities", { description: "Search MISSING for an executable capability using a natural-language task description.", inputSchema: z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(20).optional() }) }, async args => content({ query: args.query, matches: searchCapabilities(args.query, args.limit ?? 5) }));
@@ -35,6 +41,11 @@ export function registerProductTools(server: McpServer) {
     inputSchema: z.object({ intent: z.string().min(2), capability: z.string().optional(), example_input: demandExampleInputSchema.optional() }),
   }, async args => content({ recorded: recordDemand(args.intent, args.capability ?? null, "mcp", args.example_input) }));
 
+  server.registerTool("resolve_capability", { description: "Execute a capability using replay-verified provider recipes.", inputSchema: z.object({ capability: z.string(), input: z.record(z.string(), z.unknown()) }) }, async args => content(await resolveCapability(args.capability, args.input)));
+}
+
+/** Trusted operator/control-plane MCP surface. Never mount this on anonymous HTTP. */
+export function registerTrustedProductTools(server: McpServer) {
   server.registerTool("missing_demand_snapshot", { description: "Return unresolved capability demand observed by MISSING.", inputSchema: z.object({}) }, async () => content({ demand: demandSnapshot(), summary: demandSummary() }));
 
   server.registerTool("missing_supply_opportunities", { description: "Rank unresolved agent demand as supply-acquisition opportunities.", inputSchema: z.object({ limit: z.number().int().min(1).max(50).optional() }) }, async args => content({ opportunities: rankSupplyOpportunities(args.limit ?? 10) }));
@@ -58,8 +69,6 @@ export function registerProductTools(server: McpServer) {
     }),
   }));
 
-  server.registerTool("resolve_capability", { description: "Execute a capability using replay-verified provider recipes.", inputSchema: z.object({ capability: z.string(), input: z.record(z.string(), z.unknown()) }) }, async args => content(await resolveCapability(args.capability, args.input)));
-
   server.registerTool("missing_agent_rank", { description: "Inspect AgentRank provider ordering.", inputSchema: z.object({ capability: z.string().optional() }) }, async args => content(agentRankSnapshot(VERIFIED_RECIPES, args.capability)));
 
   server.registerTool("missing_economics", { description: "Inspect Kappa provider economics and durable resolution metering.", inputSchema: z.object({ capability: z.string().optional() }) }, async args => content(economicsSnapshot(VERIFIED_RECIPES, args.capability)));
@@ -74,4 +83,10 @@ export function registerProductTools(server: McpServer) {
   }
 
   server.registerTool("missing_runtime_health", { description: "Return process-local provider recipe health and circuit-breaker state.", inputSchema: z.object({}) }, async () => content({ health: runtimeHealth(), supply_acquisition_enabled: supplyAcquisitionEnabled(), provider_discovery_enabled: providerDiscoveryEnabled() }));
+}
+
+/** Full trusted/local surface retained for controlled workers and experiments. */
+export function registerProductTools(server: McpServer) {
+  registerPublicProductTools(server);
+  registerTrustedProductTools(server);
 }
