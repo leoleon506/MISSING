@@ -27,31 +27,8 @@ describe("MISSING Product Delta remote MCP edge", () => {
     await client.connect(transport);
     const tools = await client.listTools();
     const names = tools.tools.map(tool => tool.name).sort();
-
-    expect(names).toEqual([
-      "list_verified_capabilities",
-      "record_missing_capability_demand",
-      "resolve_capability",
-      "search_verified_capabilities",
-    ]);
-
-    for (const trustedOnly of [
-      "missing_runtime_health",
-      "missing_demand_snapshot",
-      "missing_supply_opportunities",
-      "discover_supply_candidates",
-      "verify_supply_candidate",
-      "acquire_verified_supply_candidate",
-      "missing_agent_rank",
-      "missing_economics",
-      "missing_prepaid_credits",
-      "compile_openapi_candidate",
-      "run_supply_acquisition_cycle",
-      "resolve_capability_charged",
-    ]) {
-      expect(names).not.toContain(trustedOnly);
-    }
-
+    expect(names).toEqual(["list_verified_capabilities", "record_missing_capability_demand", "resolve_capability", "search_verified_capabilities"]);
+    for (const trustedOnly of ["missing_runtime_health", "missing_demand_snapshot", "missing_supply_opportunities", "discover_supply_candidates", "verify_supply_candidate", "acquire_verified_supply_candidate", "missing_agent_rank", "missing_economics", "missing_prepaid_credits", "compile_openapi_candidate", "run_supply_acquisition_cycle", "resolve_capability_charged"]) expect(names).not.toContain(trustedOnly);
     await client.close();
   });
 
@@ -60,6 +37,24 @@ describe("MISSING Product Delta remote MCP edge", () => {
     await client.connect(transport);
     const result = await client.callTool({ name: "search_verified_capabilities", arguments: { query: "locate this IP address" } });
     expect(parsedText(result).matches[0]?.capability).toBe("ip_geolocation_metadata");
+    await client.close();
+  });
+
+  it("returns an x402 handoff instead of executing a provider", async () => {
+    const { client, transport } = clientForHandler();
+    await client.connect(transport);
+    const result = await client.callTool({
+      name: "resolve_capability",
+      arguments: { capability: "ip_geolocation_metadata", input: { ip_address: "1.1.1.1" } },
+    });
+    const parsed = parsedText(result);
+    expect(parsed.status).toBe("payment_required");
+    expect(parsed.rail).toBe("x402");
+    expect(parsed.endpoint).toBe("/v1/agent/resolve");
+    expect(parsed.method).toBe("POST");
+    expect(parsed.customer_price_microusd).toBeGreaterThan(0);
+    expect(parsed.request).toEqual({ capability: "ip_geolocation_metadata", input: { ip_address: "1.1.1.1" } });
+    expect(parsed).not.toHaveProperty("resolution");
     await client.close();
   });
 
