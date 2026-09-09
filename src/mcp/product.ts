@@ -40,7 +40,7 @@ export function registerPublicProductTools(server: McpServer) {
   server.registerTool("resolve_capability", {
     description: "Request execution of a replay-verified capability. Public execution is paid-only: this tool returns the canonical x402 endpoint, exact request body and current configured price; it never executes the provider directly.",
     inputSchema: z.object({ capability: z.string(), input: z.record(z.string(), z.unknown()) }),
-  }, async args => content(publicPaidResolutionHandoff(args.capability, args.input)));
+  }, async args => content(publicPaidResolutionHandoff(args.capability, args.input, "mcp")));
 }
 
 /** Trusted operator/control-plane MCP surface. Never mount this on anonymous HTTP. */

@@ -46,7 +46,7 @@ export class MissingA2AExecutor implements AgentExecutor {
     try {
       const parsed = JSON.parse(text) as { capability?: unknown; input?: unknown };
       if (typeof parsed.capability === "string" && parsed.input && typeof parsed.input === "object" && !Array.isArray(parsed.input)) {
-        const handoff = publicPaidResolutionHandoff(parsed.capability, parsed.input as Record<string, unknown>);
+        const handoff = publicPaidResolutionHandoff(parsed.capability, parsed.input as Record<string, unknown>, "a2a");
         eventBus.publish(AgentEvent.message(responseMessage(requestContext, handoff)));
         return;
       }

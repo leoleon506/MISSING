@@ -8,12 +8,20 @@ import { supplyAcquisitionEnabled } from "../runtime/acquisition.js";
 import { agentRankEnabled, agentRankExplorationEnabled, agentRankLedgerPath } from "../runtime/agentRank.js";
 import { agentPaymentsSnapshot, handleAgentPaidResolution } from "../runtime/agentPayments.js";
 import { authorizeControlPlane, controlPlaneCycleOptions, controlPlaneEnabled } from "../runtime/controlPlane.js";
+import {
+  closeConsumerTelemetry,
+  consumerTelemetrySnapshot,
+  initializeConsumerTelemetry,
+  observeDurableConsumerPayment,
+  refreshConsumerTelemetrySnapshot,
+} from "../runtime/consumerTelemetry.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
 import { distributedMoneyEnabled, initializeDistributedMoney } from "../runtime/distributedMoney.js";
 import { economicsEnforcementEnabled, economicsLedgerPath } from "../runtime/economics.js";
 import { openApiCompilerEnabled } from "../runtime/openApiCompiler.js";
 import { runThetaOrchestrator, thetaOrchestratorEnabled } from "../runtime/orchestrator.js";
 import { providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
+import { PUBLIC_ENTRY_CHANNEL_HEADER } from "../runtime/publicPaidHandoff.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { safePostReplayEnabled } from "../runtime/safePostReplay.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
@@ -49,6 +57,7 @@ export function healthPayload() {
     economics_enforcement_enabled: economicsEnforcementEnabled(),
     economics_persistence: economicsLedgerPath() !== null,
     agent_payments: agentPaymentsSnapshot(),
+    consumer_telemetry: consumerTelemetrySnapshot(),
     production_admission: productionAdmissionSnapshot(),
     settled_reorg_monitor: settledReorgMonitorSnapshot(),
     settling_recovery_worker: settlingRecoveryWorkerSnapshot(),
@@ -77,8 +86,10 @@ export function readinessPayload(baseUrl: string) {
   const distributedReady = !distributedMoneyEnabled() || agentPaymentsSnapshot().distributed_money.ready;
   const production_admission = productionAdmissionSnapshot();
   const productionAdmissionReady = !production_admission.enabled || production_admission.ready;
+  const consumer_telemetry = consumerTelemetrySnapshot();
+  const consumerTelemetryReady = !distributedMoneyEnabled() || consumer_telemetry.ready;
   return {
-    status: public_url_valid && demand_persistence && supply_persistence && agentrank_persistence && distributedReady && productionAdmissionReady ? "ready" : "not_ready",
+    status: public_url_valid && demand_persistence && supply_persistence && agentrank_persistence && distributedReady && productionAdmissionReady && consumerTelemetryReady ? "ready" : "not_ready",
     public_url_valid,
     demand_persistence,
     supply_persistence,
@@ -88,6 +99,7 @@ export function readinessPayload(baseUrl: string) {
     economics_enforcement_enabled: economicsEnforcementEnabled(),
     economics_persistence,
     agent_payments: agentPaymentsSnapshot(),
+    consumer_telemetry,
     production_admission,
     settled_reorg_monitor: settledReorgMonitorSnapshot(),
     settling_recovery_worker: settlingRecoveryWorkerSnapshot(),
@@ -160,7 +172,18 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
     try {
       await refreshProductionRpcIdentity();
       const resourceUrl = `${baseUrl.replace(/\/$/, "")}/v1/agent/resolve`;
-      const result = await handleAgentPaidResolution({ request: req.body, paymentSignature: req.get("PAYMENT-SIGNATURE"), resourceUrl });
+      const paymentSignature = req.get("PAYMENT-SIGNATURE");
+      const result = await handleAgentPaidResolution({ request: req.body, paymentSignature, resourceUrl });
+      if (paymentSignature) {
+        try {
+          await observeDurableConsumerPayment({
+            paymentSignature,
+            entryChannel: req.get(PUBLIC_ENTRY_CHANNEL_HEADER),
+          });
+        } catch (error) {
+          process.stderr.write(`consumer telemetry observation failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
+      }
       if (result.headers) for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
       res.status(result.status).json(result.body);
     } catch (error) {
@@ -199,10 +222,14 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
   app.get("/livez", (_req, res) => res.status(200).json({ status: "live" }));
   app.get("/readyz", async (_req, res) => {
     try { await refreshProductionRpcIdentity(); } catch { /* snapshot remains fail-closed */ }
+    try { await refreshConsumerTelemetrySnapshot(); } catch { /* snapshot remains fail-closed */ }
     const payload = readinessPayload(baseUrl);
     res.status(payload.status === "ready" ? 200 : 503).json(payload);
   });
-  app.get("/healthz", (_req, res) => res.status(200).json(healthPayload()));
+  app.get("/healthz", async (_req, res) => {
+    try { await refreshConsumerTelemetrySnapshot(); } catch { /* health exposes last snapshot */ }
+    res.status(200).json(healthPayload());
+  });
   app.get("/sandboxz", (_req, res) => {
     const config = sandboxConfig();
     res.status(200).json({ sandbox: config.enabled, requests_per_window: config.requests_per_window, window_ms: config.window_ms, telemetry: sandboxSnapshot() });
@@ -219,10 +246,12 @@ export async function serveHttp() {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Invalid PORT: ${process.env.PORT}`);
   if (distributedMoneyEnabled()) {
     await initializeDistributedMoney();
+    await initializeConsumerTelemetry();
     const telemetry = await reconcileSettledX402Telemetry();
     if (telemetry.recorded > 0 || telemetry.error) {
       process.stdout.write(`MISSING x402 telemetry reconciliation ${JSON.stringify(telemetry)}\n`);
     }
+    await refreshConsumerTelemetrySnapshot();
   }
   startSettlingX402RecoveryWorker();
   startSettledX402ReorgMonitor();
@@ -233,6 +262,7 @@ export async function serveHttp() {
   const close = async () => {
     await stopSettlingX402RecoveryWorker();
     await stopSettledX402ReorgMonitor();
+    await closeConsumerTelemetry();
     await productMcpHandler.close();
     server.close();
   };
