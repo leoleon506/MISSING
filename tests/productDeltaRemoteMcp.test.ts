@@ -4,8 +4,9 @@ import { resetDemand } from "../src/runtime/discovery.js";
 import { VERIFIED_RECIPES } from "../src/runtime/recipes.js";
 import { healthPayload, productMcpHandler } from "../src/mcp/http.js";
 
-const PAID_CAPABILITY = "canadian_holiday_metadata_by_id";
-const PAID_FINGERPRINT = "50ef304cfeb2c67a3b4758e8c7dcc593b7f03de6516f48f12d7455e799075f2a";
+const PAID_CAPABILITY = "ip_geolocation_metadata";
+const PAID_FINGERPRINT = "3b3d8e080a59f5f341c4faf6f035b5336343c16af162424854bdb3017f64bfb6";
+const PAID_INPUT = { ip_address: "1.1.1.1" };
 const priorEconomicsJson = process.env.MISSING_ECONOMICS_JSON;
 
 beforeAll(() => {
@@ -65,7 +66,7 @@ describe("MISSING Product Delta remote MCP edge", () => {
     await client.connect(transport);
     const result = await client.callTool({
       name: "resolve_capability",
-      arguments: { capability: PAID_CAPABILITY, input: { holidayId: 1, year: 2027 } },
+      arguments: { capability: PAID_CAPABILITY, input: PAID_INPUT },
     });
     const parsed = parsedText(result);
     expect(parsed.status).toBe("payment_required");
@@ -73,7 +74,7 @@ describe("MISSING Product Delta remote MCP edge", () => {
     expect(parsed.endpoint).toBe("/v1/agent/resolve");
     expect(parsed.method).toBe("POST");
     expect(parsed.customer_price_microusd).toBe(5000);
-    expect(parsed.request).toEqual({ capability: PAID_CAPABILITY, input: { holidayId: 1, year: 2027 } });
+    expect(parsed.request).toEqual({ capability: PAID_CAPABILITY, input: PAID_INPUT });
     expect(parsed).not.toHaveProperty("resolution");
     await client.close();
   });
