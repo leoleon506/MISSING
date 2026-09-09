@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.leoleon506/missing",
   "title": "MISSING",
-  "description": "Fallback capability resolver for AI agents. Discover replay-verified capabilities over MCP and hand off paid execution to a durable x402 rail on Base.",
+  "description": "Fallback capability resolver for AI agents with replay-verified discovery and x402 paid execution.",
   "repository": {
     "url": "https://github.com/leoleon506/MISSING",
     "source": "github"
