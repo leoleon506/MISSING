@@ -72,6 +72,30 @@ Local stdio MCP remains available with:
 npm run mcp
 ```
 
+## Public discovery
+
+The production MCP endpoint is:
+
+```text
+https://missing-production-e3da.up.railway.app/mcp
+```
+
+MISSING is published in the official MCP Registry as:
+
+```text
+io.github.leoleon506/missing
+```
+
+Public MCP tools are intentionally split by trust boundary. Discovery is free; `resolve_capability` returns an x402 payment handoff rather than executing a provider for free. Paid execution happens only through:
+
+```text
+POST https://missing-production-e3da.up.railway.app/v1/agent/resolve
+```
+
+The x402 `402 Payment Required` challenge advertises Bazaar discovery metadata while the durable payment, request-binding, settlement, finality, fencing, and recovery state machine remains unchanged.
+
+Third-party MCP directories should point to the existing remote Streamable HTTP endpoint rather than deploy or proxy a second MISSING server. `PUBLIC_DISTRIBUTION.md` records the current Smithery and Glama distribution procedure.
+
 ## Trust boundary
 
 MISSING does not treat discovery as proof.
