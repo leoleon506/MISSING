@@ -11,6 +11,7 @@ import { agentCardHandler, jsonRpcHandler, UserBuilder } from "@a2a-js/sdk/serve
 import type { Express } from "express";
 import { recordDemand, searchCapabilities } from "../runtime/discovery.js";
 import { publicPaidResolutionHandoff } from "../runtime/publicPaidHandoff.js";
+import { publicLandingHtml } from "../mcp/publicLanding.js";
 
 const textOf = (message: Message): string => {
   const part = message.parts.find(item => item.content?.$case === "text");
@@ -73,7 +74,7 @@ export function buildAgentCard(baseUrl: string): AgentCard {
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   return {
     name: "MISSING",
-    description: "A verified-capability resolver for AI agents. Discovery is free; capability execution is paid through the canonical x402 endpoint.",
+    description: "A capability fallback network for AI agents. Search replay-verified supply for free, record unresolved demand, and hand off paid execution to the canonical x402 endpoint.",
     supportedInterfaces: [{ url: normalizedBase, protocolBinding: "JSONRPC", tenant: "", protocolVersion: A2A_PROTOCOL_VERSION }],
     provider: { organization: "MISSING", url: "https://github.com/leoleon506/MISSING" },
     version: "0.2.0",
@@ -86,7 +87,7 @@ export function buildAgentCard(baseUrl: string): AgentCard {
       {
         id: "discover_verified_capability",
         name: "Discover verified capability",
-        description: "Find an executable MISSING capability from a natural-language intent. Unknown intents are recorded as unresolved demand.",
+        description: "Find replay-verified MISSING capabilities from a natural-language task. If no verified capability matches, MISSING records the unresolved demand instead of pretending the capability exists.",
         tags: ["capability-discovery", "verified-tools", "agent-fallback"],
         examples: ["locate this IP address", "find country code and region metadata"],
         inputModes: ["text"], outputModes: ["text"], securityRequirements: [],
@@ -94,13 +95,13 @@ export function buildAgentCard(baseUrl: string): AgentCard {
       {
         id: "resolve_verified_capability",
         name: "Resolve verified capability",
-        description: "Request execution of a known replay-verified capability. A2A returns the exact request and canonical x402 HTTP endpoint; provider execution occurs only after x402 payment.",
+        description: "Prepare paid execution of a known replay-verified capability. Send a JSON object with exact capability and input; A2A returns the canonical x402 endpoint, exact request body, current price, and recovery-safe payment instructions without executing the provider inside A2A.",
         tags: ["capability-resolution", "x402", "paid-execution"],
         examples: ["{\"capability\":\"ip_geolocation_metadata\",\"input\":{\"ip_address\":\"1.1.1.1\"}}"],
         inputModes: ["text"], outputModes: ["text"], securityRequirements: [],
       },
     ],
-    documentationUrl: "https://github.com/leoleon506/MISSING",
+    documentationUrl: normalizedBase,
     signatures: [],
   };
 }
@@ -108,6 +109,11 @@ export function buildAgentCard(baseUrl: string): AgentCard {
 export function mountA2A(app: Express, baseUrl: string) {
   const card = buildAgentCard(baseUrl);
   const requestHandler = new DefaultRequestHandler(card, new InMemoryTaskStore(), new MissingA2AExecutor());
+  app.get("/", (_req, res) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.status(200).send(publicLandingHtml(baseUrl));
+  });
   app.use("/.well-known/agent-card.json", agentCardHandler({ agentCardProvider: requestHandler }));
   app.use(jsonRpcHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
   return { card, requestHandler };

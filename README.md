@@ -60,6 +60,7 @@ npm run missing:serve
 
 Primary surfaces include:
 
+- `GET /` — public product landing and connection guide;
 - `POST /mcp` — MCP Streamable HTTP;
 - `GET /.well-known/agent-card.json` — A2A Agent Card;
 - `POST /` — A2A JSON-RPC;
@@ -72,13 +73,46 @@ Local stdio MCP remains available with:
 npm run mcp
 ```
 
-## Public discovery
+## Public deployment
 
-The production MCP endpoint is:
+Human-readable landing:
+
+```text
+https://missing-production-e3da.up.railway.app/
+```
+
+Canonical MCP endpoint:
 
 ```text
 https://missing-production-e3da.up.railway.app/mcp
 ```
+
+A2A Agent Card:
+
+```text
+https://missing-production-e3da.up.railway.app/.well-known/agent-card.json
+```
+
+Canonical paid execution endpoint:
+
+```text
+POST https://missing-production-e3da.up.railway.app/v1/agent/resolve
+```
+
+## Public MCP workflow
+
+The anonymous MCP exposes exactly four product tools:
+
+1. `list_verified_capabilities` — inspect the complete replay-verified catalog and example inputs.
+2. `search_verified_capabilities` — find a verified capability from a natural-language task description.
+3. `record_missing_capability_demand` — persist an unresolved capability need when no verified match exists.
+4. `resolve_capability` — prepare paid execution for an exact verified capability.
+
+Discovery and catalog inspection are free. `resolve_capability` does **not** execute a provider inside MCP and does not charge the caller. It returns a `payment_required` handoff containing the current price, exact request body, canonical `/v1/agent/resolve` endpoint, and recovery-safe x402 instructions.
+
+The subsequent HTTP x402 flow performs provider execution and settlement. Agents should preserve the exact request body and exact `PAYMENT-SIGNATURE` for recovery and should not create a second authorization for a payment already associated with a known transaction.
+
+## Public discovery
 
 MISSING is published in the official MCP Registry as:
 
@@ -86,15 +120,23 @@ MISSING is published in the official MCP Registry as:
 io.github.leoleon506/missing
 ```
 
-Public MCP tools are intentionally split by trust boundary. Discovery is free; `resolve_capability` returns an x402 payment handoff rather than executing a provider for free. Paid execution happens only through:
+Smithery public server:
 
 ```text
-POST https://missing-production-e3da.up.railway.app/v1/agent/resolve
+https://smithery.ai/servers/leo-leon506/missing
 ```
 
-The x402 `402 Payment Required` challenge advertises Bazaar discovery metadata while the durable payment, request-binding, settlement, finality, fencing, and recovery state machine remains unchanged.
+Smithery-hosted MCP gateway:
 
-Third-party MCP directories should point to the existing remote Streamable HTTP endpoint rather than deploy or proxy a second MISSING server. `PUBLIC_DISTRIBUTION.md` records the current Smithery and Glama distribution procedure.
+```text
+https://missing--leo-leon506.run.tools
+```
+
+MISSING is also indexed by Glama from its public MCP/Registry surface.
+
+Third-party MCP directories should point to the existing remote Streamable HTTP endpoint rather than deploy or proxy a second MISSING runtime. `PUBLIC_DISTRIBUTION.md` records the current Smithery and Glama distribution procedure.
+
+The x402 `402 Payment Required` challenge advertises Bazaar discovery metadata while the durable payment, request-binding, settlement, finality, fencing, and recovery state machine remains unchanged.
 
 ## Trust boundary
 
