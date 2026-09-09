@@ -5,8 +5,9 @@ import { resetDemand } from "../src/runtime/discovery.js";
 import { buildAgentCard } from "../src/a2a/server.js";
 import { createProductHttpApp } from "../src/mcp/http.js";
 
-const PAID_CAPABILITY = "canadian_holiday_metadata_by_id";
-const PAID_FINGERPRINT = "50ef304cfeb2c67a3b4758e8c7dcc593b7f03de6516f48f12d7455e799075f2a";
+const PAID_CAPABILITY = "ip_geolocation_metadata";
+const PAID_FINGERPRINT = "3b3d8e080a59f5f341c4faf6f035b5336343c16af162424854bdb3017f64bfb6";
+const PAID_INPUT = { ip_address: "1.1.1.1" };
 const priorEconomicsJson = process.env.MISSING_ECONOMICS_JSON;
 
 let server: Server;
@@ -92,7 +93,7 @@ describe("MISSING Product Epsilon A2A discovery", () => {
   });
 
   it("returns an x402 handoff instead of executing a provider through A2A", async () => {
-    const result = await sendMessage(JSON.stringify({ capability: PAID_CAPABILITY, input: { holidayId: 1, year: 2027 } }));
+    const result = await sendMessage(JSON.stringify({ capability: PAID_CAPABILITY, input: PAID_INPUT }));
     const serialized = JSON.stringify(result);
     expect(serialized).toContain("payment_required");
     expect(serialized).toContain("/v1/agent/resolve");
