@@ -18,6 +18,7 @@ import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { safePostReplayEnabled } from "../runtime/safePostReplay.js";
 import { sandboxConfig, sandboxMiddleware, sandboxSnapshot } from "../runtime/sandbox.js";
 import { settledReorgMonitorSnapshot, startSettledX402ReorgMonitor, stopSettledX402ReorgMonitor } from "../runtime/settledReorgMonitor.js";
+import { settlingRecoveryWorkerSnapshot, startSettlingX402RecoveryWorker, stopSettlingX402RecoveryWorker } from "../runtime/settlingRecoveryWorker.js";
 import { supplyLedgerPath, supplyPromotionEvidenceSnapshot, withSupplyPromotionProvenance } from "../runtime/supplyLedger.js";
 import { productionAdmissionEnabled, productionAdmissionSnapshot } from "../runtime/x402.js";
 import { refreshX402RpcNetworkIdentity } from "../runtime/x402RpcIdentity.js";
@@ -50,6 +51,7 @@ export function healthPayload() {
     agent_payments: agentPaymentsSnapshot(),
     production_admission: productionAdmissionSnapshot(),
     settled_reorg_monitor: settledReorgMonitorSnapshot(),
+    settling_recovery_worker: settlingRecoveryWorkerSnapshot(),
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
@@ -88,6 +90,7 @@ export function readinessPayload(baseUrl: string) {
     agent_payments: agentPaymentsSnapshot(),
     production_admission,
     settled_reorg_monitor: settledReorgMonitorSnapshot(),
+    settling_recovery_worker: settlingRecoveryWorkerSnapshot(),
     supply_acquisition_enabled: supplyAcquisitionEnabled(),
     provider_discovery_enabled: providerDiscoveryEnabled(),
     openapi_compiler_enabled: openApiCompilerEnabled(),
@@ -221,12 +224,14 @@ export async function serveHttp() {
       process.stdout.write(`MISSING x402 telemetry reconciliation ${JSON.stringify(telemetry)}\n`);
     }
   }
+  startSettlingX402RecoveryWorker();
   startSettledX402ReorgMonitor();
   try { await refreshProductionRpcIdentity(); } catch { /* readiness will expose failure */ }
   const resolvedPublicBaseUrl = publicBaseUrl(port, host);
   const server = createServer(createProductHttpApp(resolvedPublicBaseUrl));
 
   const close = async () => {
+    await stopSettlingX402RecoveryWorker();
     await stopSettledX402ReorgMonitor();
     await productMcpHandler.close();
     server.close();
