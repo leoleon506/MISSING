@@ -1,8 +1,24 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { resetDemand } from "../src/runtime/discovery.js";
 import { VERIFIED_RECIPES } from "../src/runtime/recipes.js";
 import { healthPayload, productMcpHandler } from "../src/mcp/http.js";
+
+const PAID_CAPABILITY = "ip_geolocation_metadata";
+const PAID_FINGERPRINT = "3b3d8e080a59f5f341c4faf6f035b5336343c16af162424854bdb3017f64bfb6";
+const PAID_INPUT = { ip_address: "1.1.1.1" };
+const priorEconomicsJson = process.env.MISSING_ECONOMICS_JSON;
+
+beforeAll(() => {
+  process.env.MISSING_ECONOMICS_JSON = JSON.stringify({
+    recipes: {
+      [PAID_FINGERPRINT]: {
+        provider_cost_microusd: 0,
+        customer_price_microusd: 5000,
+      },
+    },
+  });
+});
 
 function clientForHandler() {
   const client = new Client({ name: "missing-product-delta-test", version: "1.0.0" });
@@ -19,7 +35,11 @@ function parsedText(result: { content?: unknown[] }): any {
 }
 
 afterEach(() => resetDemand());
-afterAll(async () => productMcpHandler.close());
+afterAll(async () => {
+  if (priorEconomicsJson === undefined) delete process.env.MISSING_ECONOMICS_JSON;
+  else process.env.MISSING_ECONOMICS_JSON = priorEconomicsJson;
+  await productMcpHandler.close();
+});
 
 describe("MISSING Product Delta remote MCP edge", () => {
   it("connects in-process and exposes only the anonymous consumer surface", async () => {
@@ -27,31 +47,8 @@ describe("MISSING Product Delta remote MCP edge", () => {
     await client.connect(transport);
     const tools = await client.listTools();
     const names = tools.tools.map(tool => tool.name).sort();
-
-    expect(names).toEqual([
-      "list_verified_capabilities",
-      "record_missing_capability_demand",
-      "resolve_capability",
-      "search_verified_capabilities",
-    ]);
-
-    for (const trustedOnly of [
-      "missing_runtime_health",
-      "missing_demand_snapshot",
-      "missing_supply_opportunities",
-      "discover_supply_candidates",
-      "verify_supply_candidate",
-      "acquire_verified_supply_candidate",
-      "missing_agent_rank",
-      "missing_economics",
-      "missing_prepaid_credits",
-      "compile_openapi_candidate",
-      "run_supply_acquisition_cycle",
-      "resolve_capability_charged",
-    ]) {
-      expect(names).not.toContain(trustedOnly);
-    }
-
+    expect(names).toEqual(["list_verified_capabilities", "record_missing_capability_demand", "resolve_capability", "search_verified_capabilities"]);
+    for (const trustedOnly of ["missing_runtime_health", "missing_demand_snapshot", "missing_supply_opportunities", "discover_supply_candidates", "verify_supply_candidate", "acquire_verified_supply_candidate", "missing_agent_rank", "missing_economics", "missing_prepaid_credits", "compile_openapi_candidate", "run_supply_acquisition_cycle", "resolve_capability_charged"]) expect(names).not.toContain(trustedOnly);
     await client.close();
   });
 
@@ -60,6 +57,25 @@ describe("MISSING Product Delta remote MCP edge", () => {
     await client.connect(transport);
     const result = await client.callTool({ name: "search_verified_capabilities", arguments: { query: "locate this IP address" } });
     expect(parsedText(result).matches[0]?.capability).toBe("ip_geolocation_metadata");
+    await client.close();
+  });
+
+  it("returns an x402 handoff instead of executing a provider", async () => {
+    expect(VERIFIED_RECIPES.some(recipe => recipe.recipe_fingerprint === PAID_FINGERPRINT && recipe.capability === PAID_CAPABILITY)).toBe(true);
+    const { client, transport } = clientForHandler();
+    await client.connect(transport);
+    const result = await client.callTool({
+      name: "resolve_capability",
+      arguments: { capability: PAID_CAPABILITY, input: PAID_INPUT },
+    });
+    const parsed = parsedText(result);
+    expect(parsed.status).toBe("payment_required");
+    expect(parsed.rail).toBe("x402");
+    expect(parsed.endpoint).toBe("/v1/agent/resolve");
+    expect(parsed.method).toBe("POST");
+    expect(parsed.customer_price_microusd).toBe(5000);
+    expect(parsed.request).toEqual({ capability: PAID_CAPABILITY, input: PAID_INPUT });
+    expect(parsed).not.toHaveProperty("resolution");
     await client.close();
   });
 

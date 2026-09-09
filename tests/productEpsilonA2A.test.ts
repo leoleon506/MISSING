@@ -5,10 +5,24 @@ import { resetDemand } from "../src/runtime/discovery.js";
 import { buildAgentCard } from "../src/a2a/server.js";
 import { createProductHttpApp } from "../src/mcp/http.js";
 
+const PAID_CAPABILITY = "ip_geolocation_metadata";
+const PAID_FINGERPRINT = "3b3d8e080a59f5f341c4faf6f035b5336343c16af162424854bdb3017f64bfb6";
+const PAID_INPUT = { ip_address: "1.1.1.1" };
+const priorEconomicsJson = process.env.MISSING_ECONOMICS_JSON;
+
 let server: Server;
 let baseUrl = "";
 
 beforeAll(async () => {
+  process.env.MISSING_ECONOMICS_JSON = JSON.stringify({
+    recipes: {
+      [PAID_FINGERPRINT]: {
+        provider_cost_microusd: 0,
+        customer_price_microusd: 5000,
+      },
+    },
+  });
+
   server = createServer(createProductHttpApp("http://127.0.0.1"));
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -21,6 +35,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   resetDemand();
+  if (priorEconomicsJson === undefined) delete process.env.MISSING_ECONOMICS_JSON;
+  else process.env.MISSING_ECONOMICS_JSON = priorEconomicsJson;
   await new Promise<void>(resolve => server.close(() => resolve()));
 });
 
@@ -44,16 +60,8 @@ function userMessage(text: string) {
 async function sendMessage(text: string) {
   const response = await fetch(baseUrl, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "A2A-Version": A2A_PROTOCOL_VERSION,
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "SendMessage",
-      id: 1,
-      params: userMessage(text),
-    }),
+    headers: { "content-type": "application/json", "A2A-Version": A2A_PROTOCOL_VERSION },
+    body: JSON.stringify({ jsonrpc: "2.0", method: "SendMessage", id: 1, params: userMessage(text) }),
   });
   expect(response.ok).toBe(true);
   return response.json() as Promise<Record<string, unknown>>;
@@ -66,10 +74,9 @@ describe("MISSING Product Epsilon A2A discovery", () => {
     const card = await response.json() as any;
     expect(card.name).toBe("MISSING");
     expect(card.supportedInterfaces?.[0]?.protocolBinding).toBe("JSONRPC");
-    expect(card.skills?.map((skill: any) => skill.id)).toEqual(expect.arrayContaining([
-      "discover_verified_capability",
-      "resolve_verified_capability",
-    ]));
+    expect(card.skills?.map((skill: any) => skill.id)).toEqual(expect.arrayContaining(["discover_verified_capability", "resolve_verified_capability"]));
+    const resolve = card.skills.find((skill: any) => skill.id === "resolve_verified_capability");
+    expect(resolve.description).toContain("x402");
   });
 
   it("keeps the Agent Card deterministic from product metadata", () => {
@@ -83,6 +90,16 @@ describe("MISSING Product Epsilon A2A discovery", () => {
     const result = await sendMessage("locate this IP address");
     expect(JSON.stringify(result)).toContain("ip_geolocation_metadata");
     expect(JSON.stringify(result)).toContain("capabilities_found");
+  });
+
+  it("returns an x402 handoff instead of executing a provider through A2A", async () => {
+    const result = await sendMessage(JSON.stringify({ capability: PAID_CAPABILITY, input: PAID_INPUT }));
+    const serialized = JSON.stringify(result);
+    expect(serialized).toContain("payment_required");
+    expect(serialized).toContain("/v1/agent/resolve");
+    expect(serialized).toContain("x402");
+    expect(serialized).toContain("5000");
+    expect(serialized).not.toContain('"resolution"');
   });
 
   it("records unknown demand through the A2A surface", async () => {

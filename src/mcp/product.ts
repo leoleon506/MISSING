@@ -4,9 +4,10 @@ import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, supplyAcquisit
 import { agentRankSnapshot } from "../runtime/agentRank.js";
 import { demandSnapshot, demandSummary, recordDemand, searchCapabilities } from "../runtime/discovery.js";
 import { economicsSnapshot } from "../runtime/economics.js";
-import { resolveCapability, runtimeHealth } from "../runtime/executor.js";
+import { runtimeHealth } from "../runtime/executor.js";
 import { creditAccount, prepaidCreditsSnapshot } from "../runtime/prepaidCredits.js";
 import { discoverTopSupplyCandidates, providerDiscoveryEnabled } from "../runtime/providerDiscovery.js";
+import { publicPaidResolutionHandoff } from "../runtime/publicPaidHandoff.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import { supplyPromotionEvidenceSnapshot } from "../runtime/supplyLedger.js";
 
@@ -25,12 +26,7 @@ const supplyCandidateSchema = z.object({
   candidate_id: z.string().min(2), demand_intent: z.string().min(2), capability: z.string().regex(/^[a-z][a-z0-9_]*$/), family: z.string().min(1), provider: z.string().min(1), evidence_url: z.string().url(), method: z.literal("GET"), base_url: z.string().url(), path_template: z.string().min(1), path_bindings: z.record(z.string(), z.string()), query_bindings: z.record(z.string(), z.string()), projection: z.record(z.string(), projectionRuleSchema), required: z.array(z.string().min(1)).min(1), verification_inputs: z.array(z.record(z.string(), z.unknown())).min(2),
 });
 
-/**
- * Anonymous/public MCP surface. Keep this intentionally small: consumers may
- * discover executable supply, record unresolved demand, and use the current
- * resolution path. Commercial paid-only execution is enforced in a separate
- * launch gate so this trust-boundary change remains independently reviewable.
- */
+/** Anonymous/public MCP surface. Discovery is free; execution is x402-only. */
 export function registerPublicProductTools(server: McpServer) {
   server.registerTool("list_verified_capabilities", { description: "List capabilities currently executable by the MISSING product runtime using replay-verified provider recipes.", inputSchema: z.object({}) }, async () => content({ capabilities: VERIFIED_RECIPES.map(recipe => ({ capability: recipe.capability, family: recipe.family, provider: recipe.provider, example_input: recipe.example_input })) }));
 
@@ -41,7 +37,10 @@ export function registerPublicProductTools(server: McpServer) {
     inputSchema: z.object({ intent: z.string().min(2), capability: z.string().optional(), example_input: demandExampleInputSchema.optional() }),
   }, async args => content({ recorded: recordDemand(args.intent, args.capability ?? null, "mcp", args.example_input) }));
 
-  server.registerTool("resolve_capability", { description: "Execute a capability using replay-verified provider recipes.", inputSchema: z.object({ capability: z.string(), input: z.record(z.string(), z.unknown()) }) }, async args => content(await resolveCapability(args.capability, args.input)));
+  server.registerTool("resolve_capability", {
+    description: "Request execution of a replay-verified capability. Public execution is paid-only: this tool returns the canonical x402 endpoint, exact request body and current configured price; it never executes the provider directly.",
+    inputSchema: z.object({ capability: z.string(), input: z.record(z.string(), z.unknown()) }),
+  }, async args => content(publicPaidResolutionHandoff(args.capability, args.input)));
 }
 
 /** Trusted operator/control-plane MCP surface. Never mount this on anonymous HTTP. */
@@ -63,29 +62,20 @@ export function registerTrustedProductTools(server: McpServer) {
       recipe_fingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     }),
   }, async args => content({
-    promotions: supplyPromotionEvidenceSnapshot({
-      capability: args.capability,
-      recipeFingerprint: args.recipe_fingerprint,
-    }),
+    promotions: supplyPromotionEvidenceSnapshot({ capability: args.capability, recipeFingerprint: args.recipe_fingerprint }),
   }));
 
   server.registerTool("missing_agent_rank", { description: "Inspect AgentRank provider ordering.", inputSchema: z.object({ capability: z.string().optional() }) }, async args => content(agentRankSnapshot(VERIFIED_RECIPES, args.capability)));
-
   server.registerTool("missing_economics", { description: "Inspect Kappa provider economics and durable resolution metering.", inputSchema: z.object({ capability: z.string().optional() }) }, async args => content(economicsSnapshot(VERIFIED_RECIPES, args.capability)));
-
   server.registerTool("missing_prepaid_credits", { description: "Inspect MISSING prepaid credit balances. Credits are internal service credits, not a general-purpose transferable wallet.", inputSchema: z.object({ account_id: z.string().min(1).optional() }) }, async args => content(prepaidCreditsSnapshot(args.account_id)));
 
   if (process.env.MISSING_MANUAL_CREDIT_ENABLED === "1") {
-    server.registerTool("missing_credit_account", {
-      description: "Administrative test/bootstrap credit operation for controlled environments only.",
-      inputSchema: z.object({ account_id: z.string().min(1), amount_microusd: z.number().int().min(1), external_reference: z.string().min(1) }),
-    }, async args => content(creditAccount({ accountId: args.account_id, amountMicrousd: args.amount_microusd, externalReference: args.external_reference })));
+    server.registerTool("missing_credit_account", { description: "Administrative test/bootstrap credit operation for controlled environments only.", inputSchema: z.object({ account_id: z.string().min(1), amount_microusd: z.number().int().min(1), external_reference: z.string().min(1) }) }, async args => content(creditAccount({ accountId: args.account_id, amountMicrousd: args.amount_microusd, externalReference: args.external_reference })));
   }
 
   server.registerTool("missing_runtime_health", { description: "Return process-local provider recipe health and circuit-breaker state.", inputSchema: z.object({}) }, async () => content({ health: runtimeHealth(), supply_acquisition_enabled: supplyAcquisitionEnabled(), provider_discovery_enabled: providerDiscoveryEnabled() }));
 }
 
-/** Full trusted/local surface retained for controlled workers and experiments. */
 export function registerProductTools(server: McpServer) {
   registerPublicProductTools(server);
   registerTrustedProductTools(server);

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const serverSource = readFileSync(new URL("../src/mcp/server.ts", import.meta.url), "utf8");
 const productSource = readFileSync(new URL("../src/mcp/product.ts", import.meta.url), "utf8");
 const httpSource = readFileSync(new URL("../src/mcp/http.ts", import.meta.url), "utf8");
+const a2aSource = readFileSync(new URL("../src/a2a/server.ts", import.meta.url), "utf8");
 
 function functionBody(source: string, name: string): string {
   const start = source.indexOf(`export function ${name}`);
@@ -31,36 +32,30 @@ describe("public/trusted MCP surface boundary", () => {
   it("public product tools exclude operator telemetry and supply mutation", () => {
     const body = functionBody(productSource, "registerPublicProductTools");
     for (const name of [
-      "missing_demand_snapshot",
-      "missing_supply_opportunities",
-      "discover_supply_candidates",
-      "verify_supply_candidate",
-      "acquire_verified_supply_candidate",
-      "missing_supply_promotion_evidence",
-      "missing_agent_rank",
-      "missing_economics",
-      "missing_prepaid_credits",
-      "missing_credit_account",
-      "missing_runtime_health",
-    ]) {
-      expect(body).not.toContain(`server.registerTool(\"${name}\"`);
-    }
+      "missing_demand_snapshot", "missing_supply_opportunities", "discover_supply_candidates", "verify_supply_candidate",
+      "acquire_verified_supply_candidate", "missing_supply_promotion_evidence", "missing_agent_rank", "missing_economics",
+      "missing_prepaid_credits", "missing_credit_account", "missing_runtime_health",
+    ]) expect(body).not.toContain(`server.registerTool(\"${name}\"`);
+  });
+
+  it("public MCP execution uses only the canonical paid handoff", () => {
+    const body = functionBody(productSource, "registerPublicProductTools");
+    expect(body).toContain("publicPaidResolutionHandoff");
+    expect(body).not.toContain("resolveCapability(");
+    expect(productSource).not.toContain('import { resolveCapability');
+  });
+
+  it("A2A execution uses only the canonical paid handoff", () => {
+    expect(a2aSource).toContain("publicPaidResolutionHandoff");
+    expect(a2aSource).not.toContain("resolveCapability(");
+    expect(a2aSource).not.toContain('from "../runtime/executor.js"');
   });
 
   it("trusted product tools retain operator-only capabilities", () => {
     const body = functionBody(productSource, "registerTrustedProductTools");
     for (const name of [
-      "missing_demand_snapshot",
-      "missing_supply_opportunities",
-      "discover_supply_candidates",
-      "verify_supply_candidate",
-      "acquire_verified_supply_candidate",
-      "missing_agent_rank",
-      "missing_economics",
-      "missing_prepaid_credits",
-      "missing_runtime_health",
-    ]) {
-      expect(body).toContain(`server.registerTool(\"${name}\"`);
-    }
+      "missing_demand_snapshot", "missing_supply_opportunities", "discover_supply_candidates", "verify_supply_candidate",
+      "acquire_verified_supply_candidate", "missing_agent_rank", "missing_economics", "missing_prepaid_credits", "missing_runtime_health",
+    ]) expect(body).toContain(`server.registerTool(\"${name}\"`);
   });
 });
