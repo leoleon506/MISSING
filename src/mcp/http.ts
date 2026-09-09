@@ -29,6 +29,7 @@ import { settledReorgMonitorSnapshot, startSettledX402ReorgMonitor, stopSettledX
 import { settlingRecoveryWorkerSnapshot, startSettlingX402RecoveryWorker, stopSettlingX402RecoveryWorker } from "../runtime/settlingRecoveryWorker.js";
 import { supplyLedgerPath, supplyPromotionEvidenceSnapshot, withSupplyPromotionProvenance } from "../runtime/supplyLedger.js";
 import { productionAdmissionEnabled, productionAdmissionSnapshot } from "../runtime/x402.js";
+import { enrichX402HttpResultWithBazaar } from "../runtime/x402Bazaar.js";
 import { refreshX402RpcNetworkIdentity } from "../runtime/x402RpcIdentity.js";
 import { reconcileSettledX402Telemetry } from "../runtime/x402TelemetryReconciliation.js";
 import { createPublicProductServer } from "./server.js";
@@ -173,7 +174,8 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
       await refreshProductionRpcIdentity();
       const resourceUrl = `${baseUrl.replace(/\/$/, "")}/v1/agent/resolve`;
       const paymentSignature = req.get("PAYMENT-SIGNATURE");
-      const result = await handleAgentPaidResolution({ request: req.body, paymentSignature, resourceUrl });
+      const paymentResult = await handleAgentPaidResolution({ request: req.body, paymentSignature, resourceUrl });
+      const result = enrichX402HttpResultWithBazaar(paymentResult, req.body);
       if (paymentSignature) {
         try {
           await observeDurableConsumerPayment({
