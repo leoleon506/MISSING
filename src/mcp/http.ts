@@ -143,7 +143,8 @@ function nodeRequestToWeb(req: IncomingMessage, body?: Buffer): Request {
     if (Array.isArray(value)) for (const item of value) headers.append(key, item);
     else if (value !== undefined) headers.set(key, value);
   }
-  return new Request(url, { method: req.method, headers, body: req.method === "GET" || req.method === "HEAD" ? undefined : body });
+  const requestBody = body?.toString("utf8");
+  return new Request(url, { method: req.method, headers, body: req.method === "GET" || req.method === "HEAD" ? undefined : requestBody });
 }
 
 async function writeWebResponse(response: Response, res: ExpressResponse) {
