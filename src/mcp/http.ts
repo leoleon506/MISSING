@@ -16,6 +16,14 @@ import {
   refreshConsumerTelemetrySnapshot,
 } from "../runtime/consumerTelemetry.js";
 import { demandLedgerPath } from "../runtime/demandLedger.js";
+import {
+  closeDiscoveryTelemetry,
+  discoveryTelemetrySnapshot,
+  initializeDiscoveryTelemetry,
+  observePublicInteractions,
+  parseMcpInteractions,
+  refreshDiscoveryTelemetrySnapshot,
+} from "../runtime/discoveryTelemetry.js";
 import { distributedMoneyEnabled, initializeDistributedMoney } from "../runtime/distributedMoney.js";
 import { economicsEnforcementEnabled, economicsLedgerPath } from "../runtime/economics.js";
 import { openApiCompilerEnabled } from "../runtime/openApiCompiler.js";
@@ -59,6 +67,7 @@ export function healthPayload() {
     economics_persistence: economicsLedgerPath() !== null,
     agent_payments: agentPaymentsSnapshot(),
     consumer_telemetry: consumerTelemetrySnapshot(),
+    discovery_telemetry: discoveryTelemetrySnapshot(),
     production_admission: productionAdmissionSnapshot(),
     settled_reorg_monitor: settledReorgMonitorSnapshot(),
     settling_recovery_worker: settlingRecoveryWorkerSnapshot(),
@@ -101,6 +110,7 @@ export function readinessPayload(baseUrl: string) {
     economics_persistence,
     agent_payments: agentPaymentsSnapshot(),
     consumer_telemetry,
+    discovery_telemetry: discoveryTelemetrySnapshot(),
     production_admission,
     settled_reorg_monitor: settledReorgMonitorSnapshot(),
     settling_recovery_worker: settlingRecoveryWorkerSnapshot(),
@@ -118,7 +128,14 @@ async function refreshProductionRpcIdentity() {
   await refreshX402RpcNetworkIdentity();
 }
 
-async function nodeRequestToWeb(req: IncomingMessage): Promise<Request> {
+async function readNodeBody(req: IncomingMessage): Promise<Buffer | undefined> {
+  if (req.method === "GET" || req.method === "HEAD") return undefined;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return chunks.length ? Buffer.concat(chunks) : undefined;
+}
+
+function nodeRequestToWeb(req: IncomingMessage, body?: Buffer): Request {
   const host = req.headers.host ?? "127.0.0.1";
   const url = new URL(req.url ?? "/", `http://${host}`);
   const headers = new Headers();
@@ -126,16 +143,18 @@ async function nodeRequestToWeb(req: IncomingMessage): Promise<Request> {
     if (Array.isArray(value)) for (const item of value) headers.append(key, item);
     else if (value !== undefined) headers.set(key, value);
   }
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  const body = chunks.length ? Buffer.concat(chunks) : undefined;
-  return new Request(url, { method: req.method, headers, body: req.method === "GET" || req.method === "HEAD" ? undefined : body });
+  const requestBody = body?.toString("utf8");
+  return new Request(url, { method: req.method, headers, body: req.method === "GET" || req.method === "HEAD" ? undefined : requestBody });
 }
 
 async function writeWebResponse(response: Response, res: ExpressResponse) {
   res.status(response.status);
   response.headers.forEach((value, key) => res.setHeader(key, value));
   res.end(Buffer.from(await response.arrayBuffer()));
+}
+
+function requestIp(req: ExpressRequest): string | null {
+  return req.ip || req.socket.remoteAddress || null;
 }
 
 export function createProductHttpApp(baseUrl = publicBaseUrl()) {
@@ -168,6 +187,24 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
   });
 
   app.use(sandboxMiddleware);
+
+  app.use((req: ExpressRequest, res: ExpressResponse, next) => {
+    if (req.path === "/mcp" || req.path.startsWith("/internal/")) return next();
+    const event = req.method === "GET" && req.path === "/" ? "landing"
+      : req.method === "GET" && req.path === "/.well-known/agent-card.json" ? "agent_card"
+      : req.method === "POST" && req.path === "/" ? "a2a"
+      : null;
+    if (!event) return next();
+    res.on("finish", () => {
+      void observePublicInteractions({
+        clientIp: requestIp(req),
+        headers: req.headers,
+        events: [{ event_type: event }],
+        statusCode: res.statusCode,
+      }).catch(error => process.stderr.write(`discovery telemetry observation failed: ${error instanceof Error ? error.message : String(error)}\n`));
+    });
+    next();
+  });
 
   app.post("/v1/agent/resolve", express.json({ limit: "64kb" }), async (req: ExpressRequest, res: ExpressResponse) => {
     try {
@@ -213,8 +250,18 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
   });
 
   app.all("/mcp", async (req: ExpressRequest, res: ExpressResponse) => {
+    let rawBody: Buffer | undefined;
     try {
-      await writeWebResponse(await productMcpHandler.fetch(await nodeRequestToWeb(req)), res);
+      rawBody = await readNodeBody(req);
+      const events = parseMcpInteractions(req.method, rawBody);
+      const response = await productMcpHandler.fetch(nodeRequestToWeb(req, rawBody));
+      await writeWebResponse(response, res);
+      void observePublicInteractions({
+        clientIp: requestIp(req),
+        headers: req.headers,
+        events,
+        statusCode: response.status,
+      }).catch(error => process.stderr.write(`discovery telemetry observation failed: ${error instanceof Error ? error.message : String(error)}\n`));
     } catch (error) {
       if (!res.headersSent) res.status(500).json({ error: "internal_error" });
       process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
@@ -225,16 +272,19 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
   app.get("/readyz", async (_req, res) => {
     try { await refreshProductionRpcIdentity(); } catch { /* snapshot remains fail-closed */ }
     try { await refreshConsumerTelemetrySnapshot(); } catch { /* snapshot remains fail-closed */ }
+    try { await refreshDiscoveryTelemetrySnapshot(); } catch { /* observability must not gate readiness */ }
     const payload = readinessPayload(baseUrl);
     res.status(payload.status === "ready" ? 200 : 503).json(payload);
   });
   app.get("/healthz", async (_req, res) => {
     try { await refreshConsumerTelemetrySnapshot(); } catch { /* health exposes last snapshot */ }
+    try { await refreshDiscoveryTelemetrySnapshot(); } catch { /* health exposes last snapshot */ }
     res.status(200).json(healthPayload());
   });
-  app.get("/sandboxz", (_req, res) => {
+  app.get("/sandboxz", async (_req, res) => {
+    try { await refreshDiscoveryTelemetrySnapshot(); } catch { /* expose last snapshot */ }
     const config = sandboxConfig();
-    res.status(200).json({ sandbox: config.enabled, requests_per_window: config.requests_per_window, window_ms: config.window_ms, telemetry: sandboxSnapshot() });
+    res.status(200).json({ sandbox: config.enabled, requests_per_window: config.requests_per_window, window_ms: config.window_ms, telemetry: sandboxSnapshot(), discovery_telemetry: discoveryTelemetrySnapshot() });
   });
 
   mountA2A(app, baseUrl);
@@ -255,6 +305,7 @@ export async function serveHttp() {
     }
     await refreshConsumerTelemetrySnapshot();
   }
+  await initializeDiscoveryTelemetry();
   startSettlingX402RecoveryWorker();
   startSettledX402ReorgMonitor();
   try { await refreshProductionRpcIdentity(); } catch { /* readiness will expose failure */ }
@@ -264,6 +315,7 @@ export async function serveHttp() {
   const close = async () => {
     await stopSettlingX402RecoveryWorker();
     await stopSettledX402ReorgMonitor();
+    await closeDiscoveryTelemetry();
     await closeConsumerTelemetry();
     await productMcpHandler.close();
     server.close();
