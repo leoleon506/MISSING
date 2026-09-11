@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   discoveryChannelFromHeaders,
   discoveryClientHash,
+  discoveryHashEpoch,
   parseMcpInteractions,
 } from "../src/runtime/discoveryTelemetry.js";
 
@@ -66,6 +67,22 @@ describe("public discovery telemetry", () => {
   it("normalizes IPv4-mapped IPv6 addresses before hashing", () => {
     process.env.MISSING_DISCOVERY_TELEMETRY_HMAC_SECRET = "0123456789abcdef0123456789abcdef";
     expect(discoveryClientHash("::ffff:203.0.113.8")).toBe(discoveryClientHash("203.0.113.8"));
+  });
+
+  it("derives a stable non-secret epoch from the active HMAC secret", () => {
+    delete process.env.MISSING_DISCOVERY_TELEMETRY_HMAC_SECRET;
+    expect(discoveryHashEpoch()).toBeNull();
+
+    process.env.MISSING_DISCOVERY_TELEMETRY_HMAC_SECRET = "0123456789abcdef0123456789abcdef";
+    const first = discoveryHashEpoch();
+    const second = discoveryHashEpoch();
+    expect(first).toMatch(/^[a-f0-9]{16}$/);
+    expect(first).toBe(second);
+    expect(first).not.toContain("0123456789abcdef");
+
+    process.env.MISSING_DISCOVERY_TELEMETRY_HMAC_SECRET = "fedcba9876543210fedcba9876543210";
+    expect(discoveryHashEpoch()).toMatch(/^[a-f0-9]{16}$/);
+    expect(discoveryHashEpoch()).not.toBe(first);
   });
 
   it("classifies only explicit directory signals and otherwise stays direct or unknown", () => {
