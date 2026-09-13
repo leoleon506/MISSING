@@ -207,10 +207,11 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
   });
 
   app.post("/v1/agent/resolve", express.json({ limit: "64kb" }), async (req: ExpressRequest, res: ExpressResponse) => {
+    const paymentSignature = req.get("PAYMENT-SIGNATURE");
+    const telemetryEvent = paymentSignature ? "x402_signed_request" as const : "x402_unsigned_request" as const;
     try {
       await refreshProductionRpcIdentity();
       const resourceUrl = `${baseUrl.replace(/\/$/, "")}/v1/agent/resolve`;
-      const paymentSignature = req.get("PAYMENT-SIGNATURE");
       const paymentResult = await handleAgentPaidResolution({ request: req.body, paymentSignature, resourceUrl });
       const result = enrichX402HttpResultWithBazaar(paymentResult, req.body);
       if (paymentSignature) {
@@ -225,9 +226,21 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
       }
       if (result.headers) for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
       res.status(result.status).json(result.body);
+      void observePublicInteractions({
+        clientIp: requestIp(req),
+        headers: req.headers,
+        events: [{ event_type: telemetryEvent }],
+        statusCode: result.status,
+      }).catch(error => process.stderr.write(`x402 funnel telemetry observation failed: ${error instanceof Error ? error.message : String(error)}\n`));
     } catch (error) {
       process.stderr.write(`agent payment request failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
       res.status(500).json({ error: "internal_error" });
+      void observePublicInteractions({
+        clientIp: requestIp(req),
+        headers: req.headers,
+        events: [{ event_type: telemetryEvent }],
+        statusCode: 500,
+      }).catch(telemetryError => process.stderr.write(`x402 funnel telemetry observation failed: ${telemetryError instanceof Error ? telemetryError.message : String(telemetryError)}\n`));
     }
   });
 
