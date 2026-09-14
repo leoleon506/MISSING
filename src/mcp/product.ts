@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { acquireVerifiedSupplyCandidate, rankSupplyOpportunities, supplyAcquisitionEnabled, verifySupplyCandidate } from "../runtime/acquisition.js";
 import { agentRankSnapshot } from "../runtime/agentRank.js";
+import { quoteCapability } from "../runtime/charging.js";
 import { demandSnapshot, demandSummary, recordDemand, searchCapabilities } from "../runtime/discovery.js";
 import { economicsSnapshot } from "../runtime/economics.js";
 import { runtimeHealth } from "../runtime/executor.js";
@@ -29,24 +30,74 @@ const supplyCandidateSchema = z.object({
   candidate_id: z.string().min(2), demand_intent: z.string().min(2), capability: z.string().regex(/^[a-z][a-z0-9_]*$/), family: z.string().min(1), provider: z.string().min(1), evidence_url: z.string().url(), method: z.literal("GET"), base_url: z.string().url(), path_template: z.string().min(1), path_bindings: z.record(z.string(), z.string()), query_bindings: z.record(z.string(), z.string()), projection: z.record(z.string(), projectionRuleSchema), required: z.array(z.string().min(1)).min(1), verification_inputs: z.array(z.record(z.string(), z.unknown())).min(2),
 });
 
+export function publicExecutionMetadata(capability: string, input: Record<string, unknown>) {
+  const quote = quoteCapability(capability);
+  if (quote.status !== "quoted") {
+    return {
+      executable: false as const,
+      execution_tool: "resolve_capability" as const,
+      pricing_status: quote.status,
+      reason: quote.reason,
+      next_action: null,
+    };
+  }
+  return {
+    executable: true as const,
+    execution_tool: "resolve_capability" as const,
+    pricing_status: "quoted" as const,
+    customer_price_microusd: quote.customer_price_microusd,
+    currency: quote.currency,
+    next_action: {
+      tool: "resolve_capability" as const,
+      arguments: {
+        capability,
+        input: structuredClone(input),
+      },
+    },
+  };
+}
+
+function publicCapabilityCatalog() {
+  return VERIFIED_RECIPES.map(recipe => ({
+    capability: recipe.capability,
+    family: recipe.family,
+    provider: recipe.provider,
+    example_input: recipe.example_input,
+    execution: publicExecutionMetadata(recipe.capability, recipe.example_input),
+  }));
+}
+
 /** Anonymous/public MCP surface. Discovery is free; execution is x402-only. */
 export function registerPublicProductTools(server: McpServer) {
   server.registerTool("list_verified_capabilities", {
     title: "List Verified Capabilities",
-    description: "List every replay-verified capability currently executable by MISSING. Use this to inspect the catalog, obtain exact capability identifiers, or copy example inputs before resolve_capability; for fuzzy natural-language intent, use search_verified_capabilities instead. This is read-only, has no payment or provider side effect, and returns capability, family, provider, and example_input metadata.",
+    description: "List every replay-verified capability currently executable by MISSING. If a listed capability satisfies the caller's task, continue with the returned execution.next_action and call resolve_capability; do not stop after listing unless the caller only asked to inspect the catalog. resolve_capability is still a non-charging quote/handoff step. For fuzzy natural-language intent, use search_verified_capabilities instead. This tool is read-only and has no payment or provider side effect.",
     inputSchema: z.object({}),
     annotations: { readOnlyHint: true, openWorldHint: false },
-  }, async () => content({ capabilities: VERIFIED_RECIPES.map(recipe => ({ capability: recipe.capability, family: recipe.family, provider: recipe.provider, example_input: recipe.example_input })) }));
+  }, async () => content({
+    instruction: "If a capability satisfies the requested task, call its execution.next_action.tool with execution.next_action.arguments. This only prepares the x402 handoff and does not itself charge the caller.",
+    capabilities: publicCapabilityCatalog(),
+  }));
 
   server.registerTool("search_verified_capabilities", {
     title: "Search Verified Capabilities",
-    description: "Search the replay-verified MISSING catalog from a natural-language task description. Use this when you know the task you want performed but not the exact capability identifier; if a match is suitable, pass its capability and a valid input object to resolve_capability. This is read-only: it does not call providers, create demand, or trigger payment; limit defaults to 5 and only controls the maximum number of matches.",
+    description: "Search the replay-verified MISSING catalog from a natural-language task description. If a returned match satisfies the caller's task, continue with that match's execution.next_action and call resolve_capability; do not stop at search results unless the caller only asked to search or inspect. resolve_capability is a non-charging quote/handoff step. This tool is read-only: it does not call providers, create demand, or trigger payment; limit defaults to 5 and only controls the maximum number of matches.",
     inputSchema: z.object({
       query: z.string().min(2).describe("Natural-language description of the external capability or task you need, for example 'locate this IP address'. Describe the outcome, not an implementation."),
       limit: z.number().int().min(1).max(20).optional().describe("Maximum matches to return. Optional; defaults to 5. Valid range is 1 through 20."),
     }),
     annotations: { readOnlyHint: true, openWorldHint: false },
-  }, async args => content({ query: args.query, matches: searchCapabilities(args.query, args.limit ?? 5) }));
+  }, async args => {
+    const matches = searchCapabilities(args.query, args.limit ?? 5).map(match => ({
+      ...match,
+      execution: publicExecutionMetadata(match.capability, match.example_input),
+    }));
+    return content({
+      query: args.query,
+      instruction: "If a match satisfies the requested task, call its execution.next_action.tool with execution.next_action.arguments. This only prepares the x402 handoff and does not itself charge the caller.",
+      matches,
+    });
+  });
 
   server.registerTool("record_missing_capability_demand", {
     title: "Record Missing Capability Demand",
@@ -61,10 +112,10 @@ export function registerPublicProductTools(server: McpServer) {
 
   server.registerTool("resolve_capability", {
     title: "Resolve Verified Capability",
-    description: "Prepare paid execution of one exact replay-verified capability. Use this only after you have an exact capability identifier, normally from list_verified_capabilities or search_verified_capabilities; this MCP call itself does not execute a provider or charge the caller, but returns payment_required with the canonical /v1/agent/resolve endpoint, current price, exact request body, and x402 instructions. The later HTTP x402 flow performs execution and settlement: preserve the exact request body and exact PAYMENT-SIGNATURE for recovery, and do not create a second authorization for a payment already associated with a known transaction.",
+    description: "Prepare paid execution of one exact replay-verified capability. When list_verified_capabilities or search_verified_capabilities returns a suitable execution.next_action, call this tool with those exact arguments. This MCP call itself does not execute a provider or charge the caller; it returns payment_required with the canonical /v1/agent/resolve endpoint, current price, exact request body, and x402 instructions. The later HTTP x402 flow performs execution and settlement: preserve the exact request body and exact PAYMENT-SIGNATURE for recovery, and do not create a second authorization for a payment already associated with a known transaction.",
     inputSchema: z.object({
       capability: z.string().min(1).describe("Exact verified capability identifier returned by list_verified_capabilities or search_verified_capabilities."),
-      input: z.record(z.string(), z.unknown()).describe("JSON input object for that capability. Start from the advertised example_input when available, and reuse this exact object in the subsequent x402 HTTP request."),
+      input: z.record(z.string(), z.unknown()).describe("JSON input object for that capability. Prefer the exact execution.next_action.arguments.input returned by discovery, and reuse this exact object in the subsequent x402 HTTP request."),
     }),
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, async args => content(publicPaidResolutionHandoff(args.capability, args.input, "mcp")));
