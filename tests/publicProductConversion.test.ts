@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { publicExecutionMetadata } from "../src/mcp/product.js";
+import { publicCapabilitySearchResponse, publicExecutionMetadata } from "../src/mcp/product.js";
 
 const originalEconomicsJson = process.env.MISSING_ECONOMICS_JSON;
 const originalMinMargin = process.env.MISSING_MIN_MARGIN_MICROUSD;
@@ -64,5 +64,36 @@ describe("public capability conversion guidance", () => {
 
     expect(execution.next_action.arguments.input).toEqual(input);
     expect(execution.next_action.arguments.input).not.toBe(input);
+  });
+
+  it("returns an explicit demand-recording next action when no verified capability matches", () => {
+    const query = "reverse geocode latitude longitude into a postal code";
+    const response = publicCapabilitySearchResponse(query, 5);
+
+    expect(response).toMatchObject({
+      query,
+      status: "capability_not_yet_available",
+      missing_can_acquire_capability: true,
+      matches: [],
+      next_action: {
+        tool: "record_missing_capability_demand",
+        arguments: {
+          intent: query,
+        },
+      },
+    });
+    expect(response.instruction).toContain("replay-verify");
+    expect(response.instruction).toContain("does not guarantee immediate availability");
+  });
+
+  it("keeps verified matches on the execution path while still explaining the acquisition fallback", () => {
+    const response = publicCapabilitySearchResponse("locate this IP address", 5);
+
+    expect(response.status).toBe("verified_matches_found");
+    expect(response.missing_can_acquire_capability).toBe(true);
+    expect(response.next_action).toBeNull();
+    expect(response.matches.length).toBeGreaterThan(0);
+    expect(response.matches.some(match => match.capability === "ip_geolocation_metadata")).toBe(true);
+    expect(response.instruction).toContain("record_missing_capability_demand");
   });
 });
