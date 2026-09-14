@@ -1,10 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { publicPaidResolutionHandoff } from "../runtime/publicPaidHandoff.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import type { RuntimeInput, VerifiedRecipe } from "../runtime/types.js";
-
-const content = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
+import { handleNativeCapabilityMcpPayment } from "./nativeMcpX402.js";
 
 const RESERVED_TOOL_NAMES = new Set([
   "list_verified_capabilities",
@@ -92,11 +90,7 @@ export interface NativeCapabilityToolDescriptor {
   inputSchema: z.ZodObject<Record<string, z.ZodTypeAny>>;
 }
 
-/**
- * Every replay-verified capability is discoverable as a native tool. Commercial
- * execution still fails closed inside publicPaidResolutionHandoff when Kappa
- * has no valid quote, so visibility never bypasses economics or x402.
- */
+/** Every replay-verified capability is discoverable as a native MCP tool. */
 export function nativeCapabilityToolDescriptors(): NativeCapabilityToolDescriptor[] {
   const grouped = new Map<string, VerifiedRecipe[]>();
   for (const recipe of VERIFIED_RECIPES) {
@@ -115,7 +109,7 @@ export function nativeCapabilityToolDescriptors(): NativeCapabilityToolDescripto
       name,
       capability,
       title: titleFromCapability(capability),
-      description: `Use this direct MISSING tool to ${purposeForCapability(capability)}. Prefer this tool when the caller's task matches this capability; do not first call list_verified_capabilities or search_verified_capabilities. This MCP call never executes the provider directly. If current Kappa economics permit execution, it returns the canonical payment_required x402 handoff for /v1/agent/resolve with the current price and exact request body. If no valid quote exists, it fails closed as unavailable rather than executing for free.`,
+      description: `Use this direct MISSING tool to ${purposeForCapability(capability)}. Prefer this tool when the caller's task matches this capability; do not first call list_verified_capabilities or search_verified_capabilities. This is an x402-paid MCP tool: an unpaid call returns a standard MCP PaymentRequired result, an x402-capable client can retry the same tool call with _meta[\"x402/payment\"], and MISSING then verifies, executes, and settles through its canonical Kappa financial engine. If current economics or the payment rail are unavailable, execution fails closed rather than running for free.`,
       family: primary.family,
       providers: [...new Set(recipes.map(recipe => recipe.provider))],
       example_input: structuredClone(primary.example_input),
@@ -126,7 +120,7 @@ export function nativeCapabilityToolDescriptors(): NativeCapabilityToolDescripto
   return descriptors.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Register native capability tools before the four meta-tools to maximize tool selection. */
+/** Register native paid capability tools before the four public meta-tools. */
 export function registerNativeCapabilityTools(server: McpServer) {
   for (const descriptor of nativeCapabilityToolDescriptors()) {
     server.registerTool(descriptor.name, {
@@ -134,6 +128,10 @@ export function registerNativeCapabilityTools(server: McpServer) {
       description: descriptor.description,
       inputSchema: descriptor.inputSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
-    }, async args => content(publicPaidResolutionHandoff(descriptor.capability, args as RuntimeInput, "mcp")));
+    }, async (args, extra) => handleNativeCapabilityMcpPayment({
+      capability: descriptor.capability,
+      input: args as RuntimeInput,
+      extra,
+    }));
   }
 }

@@ -1,5 +1,5 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { resetDemand } from "../src/runtime/discovery.js";
 import { VERIFIED_RECIPES } from "../src/runtime/recipes.js";
 import { healthPayload, productMcpHandler } from "../src/mcp/http.js";
@@ -8,6 +8,7 @@ import { nativeCapabilityToolName } from "../src/mcp/nativeCapabilities.js";
 const PAID_CAPABILITY = "ip_geolocation_metadata";
 const PAID_FINGERPRINT = "3b3d8e080a59f5f341c4faf6f035b5336343c16af162424854bdb3017f64bfb6";
 const PAID_INPUT = { ip_address: "1.1.1.1" };
+const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const priorEconomicsJson = process.env.MISSING_ECONOMICS_JSON;
 
 beforeAll(() => {
@@ -19,6 +20,13 @@ beforeAll(() => {
       },
     },
   });
+  vi.stubEnv("MISSING_AGENT_PAYMENTS_ENABLED", "1");
+  vi.stubEnv("MISSING_X402_ENABLED", "1");
+  vi.stubEnv("MISSING_PRODUCTION_ADMISSION_ENABLED", "0");
+  vi.stubEnv("MISSING_X402_NETWORK", "eip155:8453");
+  vi.stubEnv("MISSING_X402_ASSET", BASE_USDC);
+  vi.stubEnv("MISSING_X402_PAY_TO", "0x1111111111111111111111111111111111111111");
+  vi.stubEnv("MISSING_X402_FACILITATOR_URL", "https://facilitator.example");
 });
 
 function clientForHandler() {
@@ -50,6 +58,7 @@ afterEach(() => resetDemand());
 afterAll(async () => {
   if (priorEconomicsJson === undefined) delete process.env.MISSING_ECONOMICS_JSON;
   else process.env.MISSING_ECONOMICS_JSON = priorEconomicsJson;
+  vi.unstubAllEnvs();
   await productMcpHandler.close();
 });
 
@@ -89,30 +98,48 @@ describe("MISSING Product Delta remote MCP edge", () => {
     await client.close();
   });
 
-  it("returns the canonical x402 handoff from both native and generic resolution without provider execution", async () => {
+  it("returns a standard MCP x402 PaymentRequired result from a native capability without executing a provider", async () => {
     expect(VERIFIED_RECIPES.some(recipe => recipe.recipe_fingerprint === PAID_FINGERPRINT && recipe.capability === PAID_CAPABILITY)).toBe(true);
     const { client, transport } = clientForHandler();
     await client.connect(transport);
 
-    const nativeResult = await client.callTool({
-      name: PAID_CAPABILITY,
-      arguments: PAID_INPUT,
+    const result = await client.callTool({ name: PAID_CAPABILITY, arguments: PAID_INPUT });
+    const parsed = parsedText(result);
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual(parsed);
+    expect(parsed).toMatchObject({
+      x402Version: 2,
+      resource: {
+        url: `mcp://tool/${PAID_CAPABILITY}`,
+        mimeType: "application/json",
+        serviceName: "MISSING",
+      },
+      accepts: [{
+        scheme: "exact",
+        network: "eip155:8453",
+        amount: "5000",
+        asset: BASE_USDC,
+      }],
     });
-    const genericResult = await client.callTool({
+    expect(parsed).not.toHaveProperty("resolution");
+    await client.close();
+  });
+
+  it("keeps generic resolve_capability as the canonical HTTP x402 compatibility handoff", async () => {
+    const { client, transport } = clientForHandler();
+    await client.connect(transport);
+    const result = await client.callTool({
       name: "resolve_capability",
       arguments: { capability: PAID_CAPABILITY, input: PAID_INPUT },
     });
-
-    for (const parsed of [parsedText(nativeResult), parsedText(genericResult)]) {
-      expect(parsed.status).toBe("payment_required");
-      expect(parsed.rail).toBe("x402");
-      expect(parsed.endpoint).toBe("/v1/agent/resolve");
-      expect(parsed.method).toBe("POST");
-      expect(parsed.customer_price_microusd).toBe(5000);
-      expect(parsed.request).toEqual({ capability: PAID_CAPABILITY, input: PAID_INPUT });
-      expect(parsed).not.toHaveProperty("resolution");
-    }
-
+    const parsed = parsedText(result);
+    expect(parsed.status).toBe("payment_required");
+    expect(parsed.rail).toBe("x402");
+    expect(parsed.endpoint).toBe("/v1/agent/resolve");
+    expect(parsed.method).toBe("POST");
+    expect(parsed.customer_price_microusd).toBe(5000);
+    expect(parsed.request).toEqual({ capability: PAID_CAPABILITY, input: PAID_INPUT });
     await client.close();
   });
 
