@@ -3,6 +3,7 @@ import { serveStdio as serveMcpStdio } from "@modelcontextprotocol/server/stdio"
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../config/index.js";
 import { registerChargingTools } from "./charging.js";
+import { registerNativeCapabilityTools } from "./nativeCapabilities.js";
 import { registerOpenApiCompilerTool } from "./openApiCompiler.js";
 import { registerThetaOrchestratorTool } from "./orchestrator.js";
 import { registerProductTools, registerPublicProductTools } from "./product.js";
@@ -14,6 +15,7 @@ const content = (value: unknown) => ({ content: [{ type: "text" as const, text: 
 /** Anonymous internet-facing MCP surface. */
 export function createPublicProductServer(): McpServer {
   const server = new McpServer({ name: "missing", version: "0.2.0" });
+  registerNativeCapabilityTools(server);
   registerPublicProductTools(server);
   return server;
 }
@@ -21,6 +23,7 @@ export function createPublicProductServer(): McpServer {
 /** Trusted/local operator surface. Never mount this on anonymous HTTP. */
 export function createProductServer(): McpServer {
   const server = new McpServer({ name: "missing-trusted", version: "0.2.0" });
+  registerNativeCapabilityTools(server);
   registerProductTools(server);
   registerChargingTools(server);
   registerOpenApiCompilerTool(server);
@@ -43,6 +46,7 @@ export function createBenchmarkServer(options: BenchmarkServerOptions): McpServe
     });
   }
   if (options.includeProductRuntime) {
+    registerNativeCapabilityTools(server);
     registerProductTools(server);
     registerChargingTools(server);
     registerOpenApiCompilerTool(server);
