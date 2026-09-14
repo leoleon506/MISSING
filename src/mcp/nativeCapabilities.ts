@@ -1,6 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { quoteCapability } from "../runtime/charging.js";
 import { publicPaidResolutionHandoff } from "../runtime/publicPaidHandoff.js";
 import { VERIFIED_RECIPES } from "../runtime/recipes.js";
 import type { RuntimeInput, VerifiedRecipe } from "../runtime/types.js";
@@ -94,8 +93,9 @@ export interface NativeCapabilityToolDescriptor {
 }
 
 /**
- * Return only capabilities that are both replay-verified and commercially
- * executable under the current fail-closed Kappa economics policy.
+ * Every replay-verified capability is discoverable as a native tool. Commercial
+ * execution still fails closed inside publicPaidResolutionHandoff when Kappa
+ * has no valid quote, so visibility never bypasses economics or x402.
  */
 export function nativeCapabilityToolDescriptors(): NativeCapabilityToolDescriptor[] {
   const grouped = new Map<string, VerifiedRecipe[]>();
@@ -109,15 +109,13 @@ export function nativeCapabilityToolDescriptors(): NativeCapabilityToolDescripto
   for (const [capability, recipes] of grouped) {
     const name = nativeCapabilityToolName(capability);
     if (!name) continue;
-    const quote = quoteCapability(capability);
-    if (quote.status !== "quoted") continue;
 
     const primary = recipes[0];
     descriptors.push({
       name,
       capability,
       title: titleFromCapability(capability),
-      description: `Use this direct MISSING tool to ${purposeForCapability(capability)}. Prefer this tool when the caller's task matches this capability; do not first call list_verified_capabilities or search_verified_capabilities. This MCP call is a free, non-charging preparation step and does not contact the provider. It returns the canonical payment_required x402 handoff for /v1/agent/resolve, including the current price and exact request body. Complete the returned HTTP x402 instructions to execute the provider.`,
+      description: `Use this direct MISSING tool to ${purposeForCapability(capability)}. Prefer this tool when the caller's task matches this capability; do not first call list_verified_capabilities or search_verified_capabilities. This MCP call never executes the provider directly. If current Kappa economics permit execution, it returns the canonical payment_required x402 handoff for /v1/agent/resolve with the current price and exact request body. If no valid quote exists, it fails closed as unavailable rather than executing for free.`,
       family: primary.family,
       providers: [...new Set(recipes.map(recipe => recipe.provider))],
       example_input: structuredClone(primary.example_input),
