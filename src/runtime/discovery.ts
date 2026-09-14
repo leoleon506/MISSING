@@ -27,7 +27,7 @@ const demand = new Map<string, DemandObservation>();
 let hydrated = false;
 
 const STOPWORDS = new Set([
-  "a", "an", "and", "api", "can", "for", "find", "get", "i", "in", "is", "me", "my", "of", "or", "service", "the", "this", "to", "tool", "using", "with",
+  "a", "an", "and", "api", "can", "code", "data", "for", "find", "get", "i", "in", "info", "information", "is", "lookup", "me", "metadata", "my", "of", "or", "service", "the", "this", "to", "tool", "using", "with",
 ]);
 
 const ALIASES: Record<string, string[]> = {
