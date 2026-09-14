@@ -1,3 +1,4 @@
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import { handleAgentPaidResolution, type AgentPaymentHttpResult } from "../runtime/agentPayments.js";
 import { observeDurableConsumerPayment } from "../runtime/consumerTelemetry.js";
 import type { RuntimeInput } from "../runtime/types.js";
@@ -5,12 +6,7 @@ import type { RuntimeInput } from "../runtime/types.js";
 export const MCP_X402_PAYMENT_META_KEY = "x402/payment";
 export const MCP_X402_PAYMENT_RESPONSE_META_KEY = "x402/payment-response";
 
-export interface NativeMcpX402Result {
-  content: Array<{ type: "text"; text: string }>;
-  isError?: boolean;
-  structuredContent?: Record<string, unknown>;
-  _meta?: Record<string, unknown>;
-}
+export type NativeMcpX402Result = CallToolResult;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -61,6 +57,7 @@ export function decodePaymentResponseHeader(value: string | undefined): Record<s
 
 function textResult(value: unknown, isError = false): NativeMcpX402Result {
   return {
+    resultType: "complete",
     content: [{ type: "text", text: JSON.stringify(value) }],
     ...(isError ? { isError: true } : {}),
   };
@@ -79,6 +76,7 @@ export function agentPaymentResultToMcp(result: AgentPaymentHttpResult): NativeM
         : "Payment required to access this tool",
     };
     return {
+      resultType: "complete",
       isError: true,
       structuredContent: paymentRequired,
       content: [{ type: "text", text: JSON.stringify(paymentRequired) }],
