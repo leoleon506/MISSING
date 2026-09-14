@@ -37,6 +37,12 @@ const paymentPayload = {
   },
 };
 
+function firstText(result: { content: Array<{ type: string } & Record<string, unknown>> }): string {
+  const first = result.content[0];
+  if (!first || first.type !== "text" || typeof first.text !== "string") throw new Error("Expected text MCP content");
+  return first.text;
+}
+
 describe("native MCP x402 transport adapter", () => {
   it("extracts the standard MCP payment metadata and encodes it for the canonical engine", () => {
     const extra = { _meta: { [MCP_X402_PAYMENT_META_KEY]: paymentPayload } };
@@ -78,6 +84,7 @@ describe("native MCP x402 transport adapter", () => {
       body: paymentRequired,
     });
 
+    expect(result.resultType).toBe("complete");
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({
       x402Version: 2,
@@ -85,7 +92,7 @@ describe("native MCP x402 transport adapter", () => {
       resource: { url: "mcp://tool/ip_geolocation_metadata" },
       accepts: [{ amount: "5000" }],
     });
-    expect(JSON.parse(result.content[0].text)).toEqual(result.structuredContent);
+    expect(JSON.parse(firstText(result))).toEqual(result.structuredContent);
   });
 
   it("converts a canonical settlement response into MCP payment-response metadata", () => {
@@ -103,6 +110,7 @@ describe("native MCP x402 transport adapter", () => {
       body,
     });
 
+    expect(result.resultType).toBe("complete");
     expect(result.isError).toBeUndefined();
     expect(result.structuredContent).toEqual(body);
     expect(result._meta?.[MCP_X402_PAYMENT_RESPONSE_META_KEY]).toEqual(settlement);
@@ -110,6 +118,7 @@ describe("native MCP x402 transport adapter", () => {
 
   it("fails closed for non-success canonical outcomes", () => {
     const result = agentPaymentResultToMcp({ status: 503, body: { error: "agent_payment_rail_not_ready" } });
+    expect(result.resultType).toBe("complete");
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toEqual({ error: "agent_payment_rail_not_ready" });
   });
