@@ -1,5 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { publicExecutionMetadata } from "../src/mcp/product.js";
+
+const originalEconomicsJson = process.env.MISSING_ECONOMICS_JSON;
+const originalMinMargin = process.env.MISSING_MIN_MARGIN_MICROUSD;
+
+beforeEach(() => {
+  process.env.MISSING_ECONOMICS_JSON = JSON.stringify({
+    recipes: {
+      "3b3d8e080a59f5f341c4faf6f035b5336343c16af162424854bdb3017f64bfb6": {
+        provider_cost_microusd: 0,
+        customer_price_microusd: 5000,
+      },
+    },
+  });
+  process.env.MISSING_MIN_MARGIN_MICROUSD = "0";
+});
+
+afterEach(() => {
+  if (originalEconomicsJson === undefined) delete process.env.MISSING_ECONOMICS_JSON;
+  else process.env.MISSING_ECONOMICS_JSON = originalEconomicsJson;
+
+  if (originalMinMargin === undefined) delete process.env.MISSING_MIN_MARGIN_MICROUSD;
+  else process.env.MISSING_MIN_MARGIN_MICROUSD = originalMinMargin;
+});
 
 describe("public capability conversion guidance", () => {
   it("returns a machine-readable resolve_capability next action for a priced verified capability", () => {
