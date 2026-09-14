@@ -67,48 +67,75 @@ function publicCapabilityCatalog() {
   }));
 }
 
+export function publicCapabilitySearchResponse(query: string, limit = 5) {
+  const matches = searchCapabilities(query, limit).map(match => ({
+    ...match,
+    execution: publicExecutionMetadata(match.capability, match.example_input),
+  }));
+
+  if (matches.length > 0) {
+    return {
+      query,
+      status: "verified_matches_found" as const,
+      missing_can_acquire_capability: true,
+      instruction: "If a match satisfies the requested task, call its execution.next_action.tool with execution.next_action.arguments. If none is suitable, call record_missing_capability_demand so MISSING can use the unmet demand to discover, replay-verify, and potentially promote new executable supply.",
+      matches,
+      next_action: null,
+    };
+  }
+
+  return {
+    query,
+    status: "capability_not_yet_available" as const,
+    missing_can_acquire_capability: true,
+    instruction: "No verified capability currently matches this request. Call record_missing_capability_demand with the returned next_action arguments. MISSING can use recorded demand to discover candidate supply, replay-verify it on a trusted worker, and promote it only if verification gates pass. Recording demand does not guarantee immediate availability.",
+    matches,
+    next_action: {
+      tool: "record_missing_capability_demand" as const,
+      arguments: {
+        intent: query,
+      },
+    },
+  };
+}
+
 /** Anonymous/public MCP surface. Discovery is free; execution is x402-only. */
 export function registerPublicProductTools(server: McpServer) {
   server.registerTool("list_verified_capabilities", {
     title: "List Verified Capabilities",
-    description: "List every replay-verified capability currently executable by MISSING. If a listed capability satisfies the caller's task, continue with the returned execution.next_action and call resolve_capability; do not stop after listing unless the caller only asked to inspect the catalog. resolve_capability is still a non-charging quote/handoff step. For fuzzy natural-language intent, use search_verified_capabilities instead. This tool is read-only and has no payment or provider side effect.",
+    description: "List every replay-verified capability currently executable by MISSING. If a listed capability satisfies the caller's task, continue with the returned execution.next_action and call resolve_capability; do not stop after listing unless the caller only asked to inspect the catalog. If no listed capability is suitable, use search_verified_capabilities with the caller's natural-language need; that search can direct you to request a new capability. resolve_capability is still a non-charging quote/handoff step. This tool is read-only and has no payment or provider side effect.",
     inputSchema: z.object({}),
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, async () => content({
-    instruction: "If a capability satisfies the requested task, call its execution.next_action.tool with execution.next_action.arguments. This only prepares the x402 handoff and does not itself charge the caller.",
+    instruction: "If a capability satisfies the requested task, call its execution.next_action.tool with execution.next_action.arguments. If none is suitable, call search_verified_capabilities with the desired outcome; MISSING can record unmet demand for future verified supply acquisition.",
+    missing_can_acquire_capability: true,
     capabilities: publicCapabilityCatalog(),
   }));
 
   server.registerTool("search_verified_capabilities", {
-    title: "Search Verified Capabilities",
-    description: "Search the replay-verified MISSING catalog from a natural-language task description. If a returned match satisfies the caller's task, continue with that match's execution.next_action and call resolve_capability; do not stop at search results unless the caller only asked to search or inspect. resolve_capability is a non-charging quote/handoff step. This tool is read-only: it does not call providers, create demand, or trigger payment; limit defaults to 5 and only controls the maximum number of matches.",
+    title: "Search or Request a Capability",
+    description: "Search the replay-verified MISSING catalog from a natural-language task description. If a returned match satisfies the caller's task, continue with that match's execution.next_action and call resolve_capability. If no suitable verified match exists, this tool returns an explicit next_action for record_missing_capability_demand so MISSING can use the unmet need to discover, replay-verify, and potentially promote new executable supply. Recording demand does not guarantee immediate creation or availability. This search itself is read-only and does not call providers, create demand, or trigger payment.",
     inputSchema: z.object({
-      query: z.string().min(2).describe("Natural-language description of the external capability or task you need, for example 'locate this IP address'. Describe the outcome, not an implementation."),
-      limit: z.number().int().min(1).max(20).optional().describe("Maximum matches to return. Optional; defaults to 5. Valid range is 1 through 20."),
+      query: z.string().min(2).describe("Natural-language description of the external capability or task you need, for example 'reverse geocode coordinates to postal code'. Describe the outcome, not an implementation."),
+      limit: z.number().int().min(1).max(20).optional().describe("Maximum verified matches to return. Optional; defaults to 5. Valid range is 1 through 20."),
     }),
     annotations: { readOnlyHint: true, openWorldHint: false },
-  }, async args => {
-    const matches = searchCapabilities(args.query, args.limit ?? 5).map(match => ({
-      ...match,
-      execution: publicExecutionMetadata(match.capability, match.example_input),
-    }));
-    return content({
-      query: args.query,
-      instruction: "If a match satisfies the requested task, call its execution.next_action.tool with execution.next_action.arguments. This only prepares the x402 handoff and does not itself charge the caller.",
-      matches,
-    });
-  });
+  }, async args => content(publicCapabilitySearchResponse(args.query, args.limit ?? 5)));
 
   server.registerTool("record_missing_capability_demand", {
-    title: "Record Missing Capability Demand",
-    description: "Record a capability need that MISSING cannot currently resolve so the trusted acquisition system can prioritize new supply. Call this only after list/search finds no suitable verified capability; it mutates the durable demand ledger and repeated calls may increase the observed demand signal. The mutation is additive and non-destructive; never put secrets, credentials, personal data, payment material, or private keys in intent or example_input.",
+    title: "Request a New Capability",
+    description: "Request a capability MISSING cannot currently resolve. Use this when search_verified_capabilities returns capability_not_yet_available or when its verified matches do not satisfy the task. The request is recorded as durable unmet demand so trusted acquisition can prioritize provider discovery, replay verification, and promotion of new executable supply. Promotion occurs only after verification gates pass, so this does not promise immediate creation or availability. The mutation is additive and non-destructive; repeated calls may increase the observed demand signal. Never include secrets, credentials, personal data, payment material, or private keys.",
     inputSchema: z.object({
       intent: z.string().min(2).describe("Natural-language description of the unresolved task or desired outcome. Keep it specific enough to evaluate future providers and exclude sensitive data."),
       capability: z.string().optional().describe("Optional proposed capability identifier if you already know an appropriate stable name. Prefer lowercase snake_case; omit this field when uncertain."),
       example_input: demandExampleInputSchema.optional(),
     }),
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  }, async args => content({ recorded: recordDemand(args.intent, args.capability ?? null, "mcp", args.example_input) }));
+  }, async args => content({
+    status: "demand_recorded",
+    message: "MISSING will use this unmet demand to prioritize discovery and verification of new supply. Availability is not guaranteed until a candidate passes replay verification and is promoted.",
+    recorded: recordDemand(args.intent, args.capability ?? null, "mcp", args.example_input),
+  }));
 
   server.registerTool("resolve_capability", {
     title: "Resolve Verified Capability",
