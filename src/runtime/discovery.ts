@@ -26,6 +26,8 @@ export interface CapabilitySearchResult {
 const demand = new Map<string, DemandObservation>();
 let hydrated = false;
 
+const MIN_CAPABILITY_SEARCH_SCORE = 0.3;
+
 const STOPWORDS = new Set([
   "a", "an", "and", "api", "can", "code", "data", "for", "find", "get", "i", "in", "info", "information", "is", "lookup", "me", "metadata", "my", "of", "or", "service", "the", "this", "to", "tool", "using", "with",
 ]);
@@ -194,6 +196,7 @@ export function searchCapabilities(query: string, limit = 5): CapabilitySearchRe
     const redundancyBonus = Math.min(recipes.length - 1, 2) * 0.08;
     const exactCapabilityBonus = normalizeIntent(query).includes(normalizeIntent(capability.replace(/_/g, " "))) ? 0.25 : 0;
     const score = Math.min(1, coverage + redundancyBonus + exactCapabilityBonus);
+    if (score < MIN_CAPABILITY_SEARCH_SCORE) continue;
 
     ranked.push({
       capability,

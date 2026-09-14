@@ -1,5 +1,6 @@
 import type { RuntimeInput, VerifiedRecipe } from "./types.js";
 import { appendPromotedRecipe, readPromotedRecipes, type SupplyPromotionOrigin } from "./supplyLedger.js";
+import { WAVE1_VERIFIED_RECIPES } from "./wave1Recipes.js";
 
 const verified = (recipe: Omit<VerifiedRecipe, "verification">): VerifiedRecipe => ({
   ...recipe,
@@ -85,6 +86,7 @@ const BASE_VERIFIED_RECIPES: VerifiedRecipe[] = [
     projection: { ip_address: { op: "INPUT", name: "ip_address" }, country_code: { op: "FIELD", path: "country_code" }, country_name: { op: "FIELD", path: "country" } },
     required: ["ip_address", "country_code", "country_name"], example_input: { ip_address: "1.1.1.1" },
   }),
+  ...WAVE1_VERIFIED_RECIPES,
 ];
 
 const baseFingerprints = new Set(BASE_VERIFIED_RECIPES.map(recipe => recipe.recipe_fingerprint));
