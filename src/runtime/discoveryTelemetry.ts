@@ -11,7 +11,17 @@ export type PublicInteractionEvent =
   | "mcp_initialize"
   | "mcp_tools_list"
   | "mcp_tool_call"
-  | "mcp_other";
+  | "mcp_other"
+  | "x402_unsigned_request"
+  | "x402_signed_request";
+
+export interface RecentExternalCandidateToolCall {
+  observed_at: string;
+  tool_name: string;
+  channel: PublicInteractionChannel;
+  client_hash_prefix: string;
+  status_code: number | null;
+}
 
 export interface DiscoveryTelemetrySnapshot {
   enabled: boolean;
@@ -35,8 +45,17 @@ export interface DiscoveryTelemetrySnapshot {
   internal_tool_calls_24h: number | null;
   external_candidate_tool_calls_24h: number | null;
   external_candidate_unique_clients_24h: number | null;
+  recent_external_candidate_tool_calls: RecentExternalCandidateToolCall[] | null;
+  x402_unsigned_requests_24h: number;
+  x402_challenges_24h: number;
+  x402_signed_requests_24h: number;
+  external_candidate_x402_unsigned_requests_24h: number | null;
+  external_candidate_x402_challenges_24h: number | null;
+  external_candidate_x402_signed_requests_24h: number | null;
   last_tool_call_at: string | null;
   last_external_candidate_at: string | null;
+  last_x402_challenge_at: string | null;
+  last_external_candidate_x402_challenge_at: string | null;
   last_error: string | null;
 }
 
@@ -63,9 +82,12 @@ CREATE TABLE IF NOT EXISTS missing_public_interactions (
   CONSTRAINT missing_public_interactions_channel_check
     CHECK (channel IN ('direct','smithery','glama','unknown')),
   CONSTRAINT missing_public_interactions_event_check
-    CHECK (event_type IN ('landing','agent_card','a2a','mcp_get','mcp_initialize','mcp_tools_list','mcp_tool_call','mcp_other'))
+    CHECK (event_type IN ('landing','agent_card','a2a','mcp_get','mcp_initialize','mcp_tools_list','mcp_tool_call','mcp_other','x402_unsigned_request','x402_signed_request'))
 );
 ALTER TABLE missing_public_interactions ADD COLUMN IF NOT EXISTS hash_epoch TEXT;
+ALTER TABLE missing_public_interactions DROP CONSTRAINT IF EXISTS missing_public_interactions_event_check;
+ALTER TABLE missing_public_interactions ADD CONSTRAINT missing_public_interactions_event_check
+  CHECK (event_type IN ('landing','agent_card','a2a','mcp_get','mcp_initialize','mcp_tools_list','mcp_tool_call','mcp_other','x402_unsigned_request','x402_signed_request'));
 CREATE INDEX IF NOT EXISTS idx_missing_public_interactions_observed_at
   ON missing_public_interactions(observed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_missing_public_interactions_client_hash
@@ -156,8 +178,17 @@ function emptySnapshot(): DiscoveryTelemetrySnapshot {
     internal_tool_calls_24h: null,
     external_candidate_tool_calls_24h: null,
     external_candidate_unique_clients_24h: null,
+    recent_external_candidate_tool_calls: null,
+    x402_unsigned_requests_24h: 0,
+    x402_challenges_24h: 0,
+    x402_signed_requests_24h: 0,
+    external_candidate_x402_unsigned_requests_24h: null,
+    external_candidate_x402_challenges_24h: null,
+    external_candidate_x402_signed_requests_24h: null,
     last_tool_call_at: null,
     last_external_candidate_at: null,
+    last_x402_challenge_at: null,
+    last_external_candidate_x402_challenge_at: null,
     last_error: null,
   };
 }
@@ -278,6 +309,12 @@ function integer(value: unknown): number {
   return typeof parsed === "number" && Number.isSafeInteger(parsed) ? parsed : 0;
 }
 
+function nullableInteger(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === "string" ? Number(value) : value;
+  return typeof parsed === "number" && Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 function mapOf(value: unknown): Record<string, number> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, integer(item)]));
@@ -285,7 +322,36 @@ function mapOf(value: unknown): Record<string, number> {
 
 function iso(value: unknown): string | null {
   if (value instanceof Date) return value.toISOString();
-  return typeof value === "string" && value ? new Date(value).toISOString() : null;
+  if (typeof value !== "string" || !value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function publicInteractionChannel(value: unknown): PublicInteractionChannel | null {
+  return value === "direct" || value === "smithery" || value === "glama" || value === "unknown" ? value : null;
+}
+
+export function sanitizeRecentExternalCandidateToolCalls(value: unknown): RecentExternalCandidateToolCall[] {
+  if (!Array.isArray(value)) return [];
+  const sanitized: RecentExternalCandidateToolCall[] = [];
+  for (const item of value.slice(0, 10)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    const observedAt = iso(row.observed_at);
+    const channel = publicInteractionChannel(row.channel);
+    const prefix = typeof row.client_hash_prefix === "string" && /^[a-f0-9]{10}$/.test(row.client_hash_prefix)
+      ? row.client_hash_prefix
+      : null;
+    if (!observedAt || !channel || !prefix) continue;
+    sanitized.push({
+      observed_at: observedAt,
+      tool_name: safeToolName(row.tool_name) ?? "unknown",
+      channel,
+      client_hash_prefix: prefix,
+      status_code: nullableInteger(row.status_code),
+    });
+  }
+  return sanitized;
 }
 
 export async function refreshDiscoveryTelemetrySnapshot(): Promise<DiscoveryTelemetrySnapshot> {
@@ -315,6 +381,15 @@ export async function refreshDiscoveryTelemetrySnapshot(): Promise<DiscoveryTele
         FROM recent WHERE event_type='mcp_tool_call' GROUP BY COALESCE(tool_name,'unknown')
       ), tool_by_channel AS (
         SELECT channel,COUNT(*)::bigint AS count FROM recent WHERE event_type='mcp_tool_call' GROUP BY channel
+      ), recent_external_tool_calls AS (
+        SELECT observed_at,COALESCE(tool_name,'unknown') AS tool_name,channel,LEFT(client_hash,10) AS client_hash_prefix,status_code
+        FROM recent
+        WHERE event_type='mcp_tool_call'
+          AND hash_epoch=$2::text
+          AND client_hash IS NOT NULL
+          AND NOT (client_hash = ANY($1::text[]))
+        ORDER BY observed_at DESC
+        LIMIT 10
       )
       SELECT
         (SELECT COUNT(*)::bigint FROM missing_public_interactions) AS interactions_total,
@@ -332,8 +407,23 @@ export async function refreshDiscoveryTelemetrySnapshot(): Promise<DiscoveryTele
         (SELECT COUNT(*)::bigint FROM recent WHERE event_type='mcp_tool_call' AND hash_epoch=$2::text AND client_hash = ANY($1::text[])) AS internal_tool_calls_24h,
         (SELECT COUNT(*)::bigint FROM recent WHERE event_type='mcp_tool_call' AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS external_candidate_tool_calls_24h,
         (SELECT COUNT(DISTINCT client_hash)::bigint FROM recent WHERE event_type='mcp_tool_call' AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS external_candidate_unique_clients_24h,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object(
+          'observed_at',observed_at,
+          'tool_name',tool_name,
+          'channel',channel,
+          'client_hash_prefix',client_hash_prefix,
+          'status_code',status_code
+        ) ORDER BY observed_at DESC) FROM recent_external_tool_calls),'[]'::jsonb) AS recent_external_candidate_tool_calls,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_unsigned_request') AS x402_unsigned_requests_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_unsigned_request' AND status_code=402) AS x402_challenges_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_signed_request') AS x402_signed_requests_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_unsigned_request' AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS external_candidate_x402_unsigned_requests_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_unsigned_request' AND status_code=402 AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS external_candidate_x402_challenges_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_signed_request' AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS external_candidate_x402_signed_requests_24h,
         (SELECT MAX(observed_at) FROM recent WHERE event_type='mcp_tool_call') AS last_tool_call_at,
-        (SELECT MAX(observed_at) FROM recent WHERE event_type='mcp_tool_call' AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS last_external_candidate_at;
+        (SELECT MAX(observed_at) FROM recent WHERE event_type='mcp_tool_call' AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS last_external_candidate_at,
+        (SELECT MAX(observed_at) FROM recent WHERE event_type='x402_unsigned_request' AND status_code=402) AS last_x402_challenge_at,
+        (SELECT MAX(observed_at) FROM recent WHERE event_type='x402_unsigned_request' AND status_code=402 AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS last_external_candidate_x402_challenge_at;
     `, [internalHashes, currentEpoch]);
     const row = result.rows[0] ?? {};
     snapshot = {
@@ -358,8 +448,17 @@ export async function refreshDiscoveryTelemetrySnapshot(): Promise<DiscoveryTele
       internal_tool_calls_24h: classification ? integer(row.internal_tool_calls_24h) : null,
       external_candidate_tool_calls_24h: classification ? integer(row.external_candidate_tool_calls_24h) : null,
       external_candidate_unique_clients_24h: classification ? integer(row.external_candidate_unique_clients_24h) : null,
+      recent_external_candidate_tool_calls: classification ? sanitizeRecentExternalCandidateToolCalls(row.recent_external_candidate_tool_calls) : null,
+      x402_unsigned_requests_24h: integer(row.x402_unsigned_requests_24h),
+      x402_challenges_24h: integer(row.x402_challenges_24h),
+      x402_signed_requests_24h: integer(row.x402_signed_requests_24h),
+      external_candidate_x402_unsigned_requests_24h: classification ? integer(row.external_candidate_x402_unsigned_requests_24h) : null,
+      external_candidate_x402_challenges_24h: classification ? integer(row.external_candidate_x402_challenges_24h) : null,
+      external_candidate_x402_signed_requests_24h: classification ? integer(row.external_candidate_x402_signed_requests_24h) : null,
       last_tool_call_at: iso(row.last_tool_call_at),
       last_external_candidate_at: classification ? iso(row.last_external_candidate_at) : null,
+      last_x402_challenge_at: iso(row.last_x402_challenge_at),
+      last_external_candidate_x402_challenge_at: classification ? iso(row.last_external_candidate_x402_challenge_at) : null,
       last_error: null,
     };
   } catch (error) {
@@ -375,6 +474,7 @@ export function discoveryTelemetrySnapshot(): DiscoveryTelemetrySnapshot {
     by_channel_24h: { ...snapshot.by_channel_24h },
     tool_calls_by_name_24h: { ...snapshot.tool_calls_by_name_24h },
     tool_calls_by_channel_24h: { ...snapshot.tool_calls_by_channel_24h },
+    recent_external_candidate_tool_calls: snapshot.recent_external_candidate_tool_calls?.map(call => ({ ...call })) ?? null,
   };
 }
 

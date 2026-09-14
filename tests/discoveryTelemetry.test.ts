@@ -4,6 +4,7 @@ import {
   discoveryClientHash,
   discoveryHashEpoch,
   parseMcpInteractions,
+  sanitizeRecentExternalCandidateToolCalls,
 } from "../src/runtime/discoveryTelemetry.js";
 
 const originalSecret = process.env.MISSING_DISCOVERY_TELEMETRY_HMAC_SECRET;
@@ -91,5 +92,76 @@ describe("public discovery telemetry", () => {
     expect(discoveryChannelFromHeaders({ "x-missing-entry-channel": "smithery", "user-agent": "generic" })).toBe("smithery");
     expect(discoveryChannelFromHeaders({ "user-agent": "generic-agent/1.0" })).toBe("direct");
     expect(discoveryChannelFromHeaders({})).toBe("unknown");
+  });
+
+  it("sanitizes recent external tool-call history without retaining extra fields", () => {
+    const rows = [
+      {
+        observed_at: "2026-09-13T04:19:04.173Z",
+        tool_name: "list_verified_capabilities",
+        channel: "direct",
+        client_hash_prefix: "0123456789",
+        status_code: 200,
+        raw_ip: "203.0.113.8",
+        arguments: { secret: "must-not-survive" },
+      },
+      {
+        observed_at: "2026-09-13T04:20:04.173Z",
+        tool_name: "../../invalid",
+        channel: "unknown",
+        client_hash_prefix: "abcdef0123",
+        status_code: null,
+      },
+      {
+        observed_at: "invalid-date",
+        tool_name: "resolve_capability",
+        channel: "direct",
+        client_hash_prefix: "fedcba9876",
+        status_code: 200,
+      },
+      {
+        observed_at: "2026-09-13T04:21:04.173Z",
+        tool_name: "resolve_capability",
+        channel: "other",
+        client_hash_prefix: "fedcba9876",
+        status_code: 200,
+      },
+      {
+        observed_at: "2026-09-13T04:22:04.173Z",
+        tool_name: "resolve_capability",
+        channel: "direct",
+        client_hash_prefix: "not-hex",
+        status_code: 200,
+      },
+    ];
+
+    expect(sanitizeRecentExternalCandidateToolCalls(rows)).toEqual([
+      {
+        observed_at: "2026-09-13T04:19:04.173Z",
+        tool_name: "list_verified_capabilities",
+        channel: "direct",
+        client_hash_prefix: "0123456789",
+        status_code: 200,
+      },
+      {
+        observed_at: "2026-09-13T04:20:04.173Z",
+        tool_name: "unknown",
+        channel: "unknown",
+        client_hash_prefix: "abcdef0123",
+        status_code: null,
+      },
+    ]);
+  });
+
+  it("caps recent external tool-call history at ten entries", () => {
+    const rows = Array.from({ length: 12 }, (_, index) => ({
+      observed_at: new Date(Date.UTC(2026, 8, 13, 5, index, 0)).toISOString(),
+      tool_name: "list_verified_capabilities",
+      channel: "direct",
+      client_hash_prefix: index.toString(16).padStart(10, "0"),
+      status_code: 200,
+    }));
+
+    expect(sanitizeRecentExternalCandidateToolCalls(rows)).toHaveLength(10);
   });
 });
