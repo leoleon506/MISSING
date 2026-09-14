@@ -1,0 +1,31 @@
+name: Capability Expansion Wave 1 Live Replay
+
+on:
+  pull_request:
+    paths:
+      - "src/runtime/wave1Recipes.ts"
+      - "src/runtime/verifyWave1Live.ts"
+      - "src/runtime/recipes.ts"
+      - "src/runtime/discovery.ts"
+      - "tests/capabilityWave1.test.ts"
+      - ".github/workflows/capability-wave1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Replay every Wave 1 recipe with two live inputs
+        run: npx tsx src/runtime/verifyWave1Live.ts
