@@ -6,6 +6,7 @@ import { VERIFIED_RECIPES } from "../src/runtime/recipes.js";
 const originalEconomicsJson = process.env.MISSING_ECONOMICS_JSON;
 const originalMinMargin = process.env.MISSING_MIN_MARGIN_MICROUSD;
 const nativeSource = readFileSync(new URL("../src/mcp/nativeCapabilities.ts", import.meta.url), "utf8");
+const adapterSource = readFileSync(new URL("../src/mcp/nativeMcpX402.ts", import.meta.url), "utf8");
 const serverSource = readFileSync(new URL("../src/mcp/server.ts", import.meta.url), "utf8");
 
 beforeEach(() => {
@@ -49,7 +50,7 @@ describe("native capability MCP tools", () => {
     const exchange = nativeCapabilityToolDescriptors().find(tool => tool.capability === "currency_exchange_rate");
     expect(exchange).toBeDefined();
     expect(exchange!.inputSchema.safeParse({ base_currency: "usd", quote_currency: "eur" }).success).toBe(true);
-    expect(exchange!.description).toContain("current exchange rate");
+    expect(exchange!.description).toContain("x402-paid MCP tool");
   });
 
   it("mounts native tools before meta-tools on the anonymous MCP server", () => {
@@ -60,10 +61,15 @@ describe("native capability MCP tools", () => {
     expect(body.indexOf("registerNativeCapabilityTools(server)")).toBeLessThan(body.indexOf("registerPublicProductTools(server)"));
   });
 
-  it("keeps native execution on the canonical paid handoff and never calls providers directly", () => {
-    expect(nativeSource).toContain("publicPaidResolutionHandoff");
+  it("routes native execution through the MCP adapter and canonical agent payment engine only", () => {
+    expect(nativeSource).toContain("handleNativeCapabilityMcpPayment");
+    expect(nativeSource).not.toContain("publicPaidResolutionHandoff");
     expect(nativeSource).not.toContain("resolveCapability(");
     expect(nativeSource).not.toContain('from "../runtime/executor.js"');
-    expect(nativeSource).toContain('"mcp"');
+
+    expect(adapterSource).toContain("handleAgentPaidResolution");
+    expect(adapterSource).not.toContain("resolveCapability(");
+    expect(adapterSource).not.toContain("verifyX402Payment(");
+    expect(adapterSource).not.toContain("settleX402Payment(");
   });
 });
