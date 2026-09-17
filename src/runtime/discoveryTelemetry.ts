@@ -3,6 +3,7 @@ import { Pool, type PoolConfig } from "pg";
 import { distributedMoneyDatabaseUrl } from "./distributedMoney.js";
 
 export type PublicInteractionChannel = "direct" | "smithery" | "glama" | "unknown";
+export type PublicInteractionSourceClass = "internal" | "known_probe" | "platform_client" | "external_candidate" | "unclassified";
 export type PublicInteractionEvent =
   | "landing"
   | "agent_card"
@@ -37,9 +38,12 @@ export interface DiscoveryTelemetrySnapshot {
   mcp_tool_calls_24h: number;
   unique_tool_call_clients_24h: number;
   known_directory_scans_24h: number;
+  known_probe_tool_calls_24h: number;
+  platform_client_tool_calls_24h: number;
   legacy_unclassified_tool_calls_24h: number;
   by_event_24h: Record<string, number>;
   by_channel_24h: Record<string, number>;
+  by_source_class_24h: Record<string, number>;
   tool_calls_by_name_24h: Record<string, number>;
   tool_calls_by_channel_24h: Record<string, number>;
   internal_tool_calls_24h: number | null;
@@ -69,6 +73,32 @@ let pool: Pool | null = null;
 let initialized = false;
 let snapshot: DiscoveryTelemetrySnapshot = emptySnapshot();
 
+const KNOWN_PROBE_USER_AGENT_FRAGMENTS = [
+  "sentineloracle",
+  "mcpbeat",
+  "proofbench",
+  "wellknownbot",
+  "rokmcp-collector",
+  "mcpwatch",
+  "mcpscan",
+  "mcp-observatory",
+  "golemreachtrustbot",
+  "agentindexbot",
+  "aive-mcp",
+  "api-forge-mcp-index",
+  "mcp-catalog-research",
+  "verifymcp",
+  "agent-world-probe",
+  "x402-observatory",
+  "402explorer",
+  "xuseek-mcp-catalog",
+  "strata-observatory",
+];
+
+const PLATFORM_CLIENT_USER_AGENT_FRAGMENTS = [
+  "openai-mcp/",
+];
+
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS missing_public_interactions (
   id BIGSERIAL PRIMARY KEY,
@@ -76,15 +106,22 @@ CREATE TABLE IF NOT EXISTS missing_public_interactions (
   client_hash TEXT,
   hash_epoch TEXT,
   channel TEXT NOT NULL,
+  source_class TEXT,
   event_type TEXT NOT NULL,
   tool_name TEXT,
   status_code INTEGER,
   CONSTRAINT missing_public_interactions_channel_check
     CHECK (channel IN ('direct','smithery','glama','unknown')),
+  CONSTRAINT missing_public_interactions_source_class_check
+    CHECK (source_class IS NULL OR source_class IN ('internal','known_probe','platform_client','external_candidate','unclassified')),
   CONSTRAINT missing_public_interactions_event_check
     CHECK (event_type IN ('landing','agent_card','a2a','mcp_get','mcp_initialize','mcp_tools_list','mcp_tool_call','mcp_other','x402_unsigned_request','x402_signed_request'))
 );
 ALTER TABLE missing_public_interactions ADD COLUMN IF NOT EXISTS hash_epoch TEXT;
+ALTER TABLE missing_public_interactions ADD COLUMN IF NOT EXISTS source_class TEXT;
+ALTER TABLE missing_public_interactions DROP CONSTRAINT IF EXISTS missing_public_interactions_source_class_check;
+ALTER TABLE missing_public_interactions ADD CONSTRAINT missing_public_interactions_source_class_check
+  CHECK (source_class IS NULL OR source_class IN ('internal','known_probe','platform_client','external_candidate','unclassified'));
 ALTER TABLE missing_public_interactions DROP CONSTRAINT IF EXISTS missing_public_interactions_event_check;
 ALTER TABLE missing_public_interactions ADD CONSTRAINT missing_public_interactions_event_check
   CHECK (event_type IN ('landing','agent_card','a2a','mcp_get','mcp_initialize','mcp_tools_list','mcp_tool_call','mcp_other','x402_unsigned_request','x402_signed_request'));
@@ -96,6 +133,9 @@ CREATE INDEX IF NOT EXISTS idx_missing_public_interactions_client_hash
 CREATE INDEX IF NOT EXISTS idx_missing_public_interactions_hash_epoch
   ON missing_public_interactions(hash_epoch)
   WHERE hash_epoch IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_missing_public_interactions_source_class
+  ON missing_public_interactions(source_class)
+  WHERE source_class IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_missing_public_interactions_tool_name
   ON missing_public_interactions(tool_name)
   WHERE tool_name IS NOT NULL;
@@ -147,12 +187,44 @@ function internalClientHashes(): string[] {
   if (!stableSecret()) return [];
   return (process.env.MISSING_INTERNAL_CLIENT_IPS ?? "")
     .split(",")
+    .map(value => value.trim())
+    .filter(Boolean)
     .map(value => discoveryClientHash(value))
     .filter((value): value is string => Boolean(value));
 }
 
 function classificationReady(): boolean {
-  return Boolean(discoveryHashEpoch()) && internalClientHashes().length > 0;
+  return Boolean(discoveryHashEpoch());
+}
+
+function headerValue(headers: Record<string, string | string[] | undefined>, name: string): string {
+  const raw = headers[name];
+  return (Array.isArray(raw) ? raw[0] : raw)?.trim() ?? "";
+}
+
+export function discoveryChannelFromHeaders(headers: Record<string, string | string[] | undefined>): PublicInteractionChannel {
+  const explicit = headerValue(headers, "x-missing-entry-channel").toLowerCase();
+  if (explicit === "smithery" || explicit === "glama") return explicit;
+
+  const userAgent = headerValue(headers, "user-agent").toLowerCase();
+  if (userAgent.includes("smithery")) return "smithery";
+  if (userAgent.includes("glama")) return "glama";
+  return userAgent ? "direct" : "unknown";
+}
+
+export function discoverySourceClassFromHeaders(
+  headers: Record<string, string | string[] | undefined>,
+  clientHash: string | null,
+): PublicInteractionSourceClass {
+  if (clientHash && internalClientHashes().includes(clientHash)) return "internal";
+
+  const channel = discoveryChannelFromHeaders(headers);
+  const userAgent = headerValue(headers, "user-agent").toLowerCase();
+  if (channel === "smithery" || channel === "glama") return "known_probe";
+  if (KNOWN_PROBE_USER_AGENT_FRAGMENTS.some(fragment => userAgent.includes(fragment))) return "known_probe";
+  if (PLATFORM_CLIENT_USER_AGENT_FRAGMENTS.some(fragment => userAgent.includes(fragment))) return "platform_client";
+  if (!clientHash || !discoveryHashEpoch()) return "unclassified";
+  return "external_candidate";
 }
 
 function emptySnapshot(): DiscoveryTelemetrySnapshot {
@@ -170,9 +242,12 @@ function emptySnapshot(): DiscoveryTelemetrySnapshot {
     mcp_tool_calls_24h: 0,
     unique_tool_call_clients_24h: 0,
     known_directory_scans_24h: 0,
+    known_probe_tool_calls_24h: 0,
+    platform_client_tool_calls_24h: 0,
     legacy_unclassified_tool_calls_24h: 0,
     by_event_24h: {},
     by_channel_24h: {},
+    by_source_class_24h: {},
     tool_calls_by_name_24h: {},
     tool_calls_by_channel_24h: {},
     internal_tool_calls_24h: null,
@@ -219,18 +294,6 @@ function telemetryPool(): Pool {
   });
   pool = created;
   return created;
-}
-
-export function discoveryChannelFromHeaders(headers: Record<string, string | string[] | undefined>): PublicInteractionChannel {
-  const explicitRaw = headers["x-missing-entry-channel"];
-  const explicit = (Array.isArray(explicitRaw) ? explicitRaw[0] : explicitRaw)?.trim().toLowerCase();
-  if (explicit === "smithery" || explicit === "glama") return explicit;
-
-  const userAgentRaw = headers["user-agent"];
-  const userAgent = (Array.isArray(userAgentRaw) ? userAgentRaw[0] : userAgentRaw)?.toLowerCase() ?? "";
-  if (userAgent.includes("smithery")) return "smithery";
-  if (userAgent.includes("glama")) return "glama";
-  return userAgent ? "direct" : "unknown";
 }
 
 function safeToolName(value: unknown): string | null {
@@ -291,15 +354,17 @@ export async function observePublicInteractions(args: {
   statusCode?: number | null;
 }): Promise<void> {
   if (!enabled() || !await ensureInitialized()) return;
+  const headers = args.headers ?? {};
   const clientHash = discoveryClientHash(args.clientIp);
   const hashEpoch = discoveryHashEpoch();
-  const channel = discoveryChannelFromHeaders(args.headers ?? {});
+  const channel = discoveryChannelFromHeaders(headers);
+  const sourceClass = discoverySourceClassFromHeaders(headers, clientHash);
   const statusCode = Number.isInteger(args.statusCode) ? args.statusCode! : null;
   for (const event of args.events) {
     await telemetryPool().query(
-      `INSERT INTO missing_public_interactions(client_hash,hash_epoch,channel,event_type,tool_name,status_code)
-       VALUES($1,$2,$3,$4,$5,$6)`,
-      [clientHash, hashEpoch, channel, event.event_type, event.tool_name ?? null, statusCode],
+      `INSERT INTO missing_public_interactions(client_hash,hash_epoch,channel,source_class,event_type,tool_name,status_code)
+       VALUES($1,$2,$3,$4,$5,$6,$7)`,
+      [clientHash, hashEpoch, channel, sourceClass, event.event_type, event.tool_name ?? null, statusCode],
     );
   }
 }
@@ -361,7 +426,6 @@ export async function refreshDiscoveryTelemetrySnapshot(): Promise<DiscoveryTele
     if (!current.ready) return current;
   }
 
-  const internalHashes = internalClientHashes();
   const currentEpoch = discoveryHashEpoch();
   const classification = classificationReady();
   try {
@@ -376,6 +440,9 @@ export async function refreshDiscoveryTelemetrySnapshot(): Promise<DiscoveryTele
         SELECT event_type,COUNT(*)::bigint AS count FROM recent GROUP BY event_type
       ), by_channel AS (
         SELECT channel,COUNT(*)::bigint AS count FROM recent GROUP BY channel
+      ), by_source_class AS (
+        SELECT COALESCE(source_class,'legacy_unclassified') AS source_class,COUNT(*)::bigint AS count
+        FROM recent GROUP BY COALESCE(source_class,'legacy_unclassified')
       ), by_tool AS (
         SELECT COALESCE(tool_name,'unknown') AS tool_name,COUNT(*)::bigint AS count
         FROM recent WHERE event_type='mcp_tool_call' GROUP BY COALESCE(tool_name,'unknown')
@@ -385,9 +452,9 @@ export async function refreshDiscoveryTelemetrySnapshot(): Promise<DiscoveryTele
         SELECT observed_at,COALESCE(tool_name,'unknown') AS tool_name,channel,LEFT(client_hash,10) AS client_hash_prefix,status_code
         FROM recent
         WHERE event_type='mcp_tool_call'
-          AND hash_epoch=$2::text
+          AND source_class='external_candidate'
+          AND hash_epoch=$1::text
           AND client_hash IS NOT NULL
-          AND NOT (client_hash = ANY($1::text[]))
         ORDER BY observed_at DESC
         LIMIT 10
       )
@@ -398,15 +465,18 @@ export async function refreshDiscoveryTelemetrySnapshot(): Promise<DiscoveryTele
         (SELECT COUNT(*)::bigint FROM recent WHERE event_type LIKE 'mcp_%') AS mcp_interactions_24h,
         (SELECT COUNT(*)::bigint FROM recent WHERE event_type='mcp_tool_call') AS mcp_tool_calls_24h,
         (SELECT COUNT(DISTINCT client_hash)::bigint FROM recent WHERE event_type='mcp_tool_call' AND client_hash IS NOT NULL) AS unique_tool_call_clients_24h,
-        (SELECT COUNT(*)::bigint FROM recent WHERE channel IN ('smithery','glama') AND event_type IN ('mcp_initialize','mcp_tools_list','mcp_get')) AS known_directory_scans_24h,
-        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='mcp_tool_call' AND ($2::text IS NULL OR hash_epoch IS DISTINCT FROM $2::text)) AS legacy_unclassified_tool_calls_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE source_class='known_probe' AND event_type IN ('mcp_initialize','mcp_tools_list','mcp_get')) AS known_directory_scans_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE source_class='known_probe' AND event_type='mcp_tool_call') AS known_probe_tool_calls_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE source_class='platform_client' AND event_type='mcp_tool_call') AS platform_client_tool_calls_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='mcp_tool_call' AND (source_class IS NULL OR source_class='unclassified' OR $1::text IS NULL OR hash_epoch IS DISTINCT FROM $1::text)) AS legacy_unclassified_tool_calls_24h,
         COALESCE((SELECT jsonb_object_agg(event_type,count) FROM by_event),'{}'::jsonb) AS by_event_24h,
         COALESCE((SELECT jsonb_object_agg(channel,count) FROM by_channel),'{}'::jsonb) AS by_channel_24h,
+        COALESCE((SELECT jsonb_object_agg(source_class,count) FROM by_source_class),'{}'::jsonb) AS by_source_class_24h,
         COALESCE((SELECT jsonb_object_agg(tool_name,count) FROM by_tool),'{}'::jsonb) AS tool_calls_by_name_24h,
         COALESCE((SELECT jsonb_object_agg(channel,count) FROM tool_by_channel),'{}'::jsonb) AS tool_calls_by_channel_24h,
-        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='mcp_tool_call' AND hash_epoch=$2::text AND client_hash = ANY($1::text[])) AS internal_tool_calls_24h,
-        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='mcp_tool_call' AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS external_candidate_tool_calls_24h,
-        (SELECT COUNT(DISTINCT client_hash)::bigint FROM recent WHERE event_type='mcp_tool_call' AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS external_candidate_unique_clients_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='mcp_tool_call' AND source_class='internal' AND hash_epoch=$1::text) AS internal_tool_calls_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='mcp_tool_call' AND source_class='external_candidate' AND hash_epoch=$1::text) AS external_candidate_tool_calls_24h,
+        (SELECT COUNT(DISTINCT client_hash)::bigint FROM recent WHERE event_type='mcp_tool_call' AND source_class='external_candidate' AND hash_epoch=$1::text AND client_hash IS NOT NULL) AS external_candidate_unique_clients_24h,
         COALESCE((SELECT jsonb_agg(jsonb_build_object(
           'observed_at',observed_at,
           'tool_name',tool_name,
@@ -417,14 +487,14 @@ export async function refreshDiscoveryTelemetrySnapshot(): Promise<DiscoveryTele
         (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_unsigned_request') AS x402_unsigned_requests_24h,
         (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_unsigned_request' AND status_code=402) AS x402_challenges_24h,
         (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_signed_request') AS x402_signed_requests_24h,
-        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_unsigned_request' AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS external_candidate_x402_unsigned_requests_24h,
-        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_unsigned_request' AND status_code=402 AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS external_candidate_x402_challenges_24h,
-        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_signed_request' AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS external_candidate_x402_signed_requests_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_unsigned_request' AND source_class='external_candidate' AND hash_epoch=$1::text) AS external_candidate_x402_unsigned_requests_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_unsigned_request' AND status_code=402 AND source_class='external_candidate' AND hash_epoch=$1::text) AS external_candidate_x402_challenges_24h,
+        (SELECT COUNT(*)::bigint FROM recent WHERE event_type='x402_signed_request' AND source_class='external_candidate' AND hash_epoch=$1::text) AS external_candidate_x402_signed_requests_24h,
         (SELECT MAX(observed_at) FROM recent WHERE event_type='mcp_tool_call') AS last_tool_call_at,
-        (SELECT MAX(observed_at) FROM recent WHERE event_type='mcp_tool_call' AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS last_external_candidate_at,
+        (SELECT MAX(observed_at) FROM recent WHERE event_type='mcp_tool_call' AND source_class='external_candidate' AND hash_epoch=$1::text) AS last_external_candidate_at,
         (SELECT MAX(observed_at) FROM recent WHERE event_type='x402_unsigned_request' AND status_code=402) AS last_x402_challenge_at,
-        (SELECT MAX(observed_at) FROM recent WHERE event_type='x402_unsigned_request' AND status_code=402 AND hash_epoch=$2::text AND client_hash IS NOT NULL AND NOT (client_hash = ANY($1::text[]))) AS last_external_candidate_x402_challenge_at;
-    `, [internalHashes, currentEpoch]);
+        (SELECT MAX(observed_at) FROM recent WHERE event_type='x402_unsigned_request' AND status_code=402 AND source_class='external_candidate' AND hash_epoch=$1::text) AS last_external_candidate_x402_challenge_at;
+    `, [currentEpoch]);
     const row = result.rows[0] ?? {};
     snapshot = {
       enabled: true,
@@ -440,9 +510,12 @@ export async function refreshDiscoveryTelemetrySnapshot(): Promise<DiscoveryTele
       mcp_tool_calls_24h: integer(row.mcp_tool_calls_24h),
       unique_tool_call_clients_24h: integer(row.unique_tool_call_clients_24h),
       known_directory_scans_24h: integer(row.known_directory_scans_24h),
+      known_probe_tool_calls_24h: integer(row.known_probe_tool_calls_24h),
+      platform_client_tool_calls_24h: integer(row.platform_client_tool_calls_24h),
       legacy_unclassified_tool_calls_24h: integer(row.legacy_unclassified_tool_calls_24h),
       by_event_24h: mapOf(row.by_event_24h),
       by_channel_24h: mapOf(row.by_channel_24h),
+      by_source_class_24h: mapOf(row.by_source_class_24h),
       tool_calls_by_name_24h: mapOf(row.tool_calls_by_name_24h),
       tool_calls_by_channel_24h: mapOf(row.tool_calls_by_channel_24h),
       internal_tool_calls_24h: classification ? integer(row.internal_tool_calls_24h) : null,
@@ -462,7 +535,14 @@ export async function refreshDiscoveryTelemetrySnapshot(): Promise<DiscoveryTele
       last_error: null,
     };
   } catch (error) {
-    snapshot = { ...snapshot, enabled: true, ready: false, stable_client_hashes: Boolean(stableSecret()), classification_ready: classification, last_error: error instanceof Error ? error.message : String(error) };
+    snapshot = {
+      ...snapshot,
+      enabled: true,
+      ready: false,
+      stable_client_hashes: Boolean(stableSecret()),
+      classification_ready: classification,
+      last_error: error instanceof Error ? error.message : String(error),
+    };
   }
   return snapshot;
 }
@@ -472,6 +552,7 @@ export function discoveryTelemetrySnapshot(): DiscoveryTelemetrySnapshot {
     ...snapshot,
     by_event_24h: { ...snapshot.by_event_24h },
     by_channel_24h: { ...snapshot.by_channel_24h },
+    by_source_class_24h: { ...snapshot.by_source_class_24h },
     tool_calls_by_name_24h: { ...snapshot.tool_calls_by_name_24h },
     tool_calls_by_channel_24h: { ...snapshot.tool_calls_by_channel_24h },
     recent_external_candidate_tool_calls: snapshot.recent_external_candidate_tool_calls?.map(call => ({ ...call })) ?? null,
