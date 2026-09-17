@@ -3,15 +3,19 @@ import {
   discoveryChannelFromHeaders,
   discoveryClientHash,
   discoveryHashEpoch,
+  discoverySourceClassFromHeaders,
   parseMcpInteractions,
   sanitizeRecentExternalCandidateToolCalls,
 } from "../src/runtime/discoveryTelemetry.js";
 
 const originalSecret = process.env.MISSING_DISCOVERY_TELEMETRY_HMAC_SECRET;
+const originalInternalIps = process.env.MISSING_INTERNAL_CLIENT_IPS;
 
 afterEach(() => {
   if (originalSecret === undefined) delete process.env.MISSING_DISCOVERY_TELEMETRY_HMAC_SECRET;
   else process.env.MISSING_DISCOVERY_TELEMETRY_HMAC_SECRET = originalSecret;
+  if (originalInternalIps === undefined) delete process.env.MISSING_INTERNAL_CLIENT_IPS;
+  else process.env.MISSING_INTERNAL_CLIENT_IPS = originalInternalIps;
 });
 
 describe("public discovery telemetry", () => {
@@ -92,6 +96,32 @@ describe("public discovery telemetry", () => {
     expect(discoveryChannelFromHeaders({ "x-missing-entry-channel": "smithery", "user-agent": "generic" })).toBe("smithery");
     expect(discoveryChannelFromHeaders({ "user-agent": "generic-agent/1.0" })).toBe("direct");
     expect(discoveryChannelFromHeaders({})).toBe("unknown");
+  });
+
+  it("separates platform clients and known probes from external candidates", () => {
+    process.env.MISSING_DISCOVERY_TELEMETRY_HMAC_SECRET = "0123456789abcdef0123456789abcdef";
+    delete process.env.MISSING_INTERNAL_CLIENT_IPS;
+    const hash = discoveryClientHash("203.0.113.8");
+
+    expect(discoverySourceClassFromHeaders({ "user-agent": "openai-mcp/1.0.0" }, hash)).toBe("platform_client");
+    expect(discoverySourceClassFromHeaders({ "user-agent": "SentinelOracle/0.1" }, hash)).toBe("known_probe");
+    expect(discoverySourceClassFromHeaders({ "user-agent": "xuseek-mcp-catalog/0.5" }, hash)).toBe("known_probe");
+    expect(discoverySourceClassFromHeaders({ "user-agent": "generic-mcp-client/1.0" }, hash)).toBe("external_candidate");
+  });
+
+  it("gives configured internal clients precedence over user-agent classification", () => {
+    process.env.MISSING_DISCOVERY_TELEMETRY_HMAC_SECRET = "0123456789abcdef0123456789abcdef";
+    process.env.MISSING_INTERNAL_CLIENT_IPS = "203.0.113.8";
+    const hash = discoveryClientHash("203.0.113.8");
+
+    expect(discoverySourceClassFromHeaders({ "user-agent": "openai-mcp/1.0.0" }, hash)).toBe("internal");
+    expect(discoverySourceClassFromHeaders({ "user-agent": "generic-agent/1.0" }, hash)).toBe("internal");
+  });
+
+  it("leaves traffic unclassified when stable hashing is unavailable", () => {
+    delete process.env.MISSING_DISCOVERY_TELEMETRY_HMAC_SECRET;
+    delete process.env.MISSING_INTERNAL_CLIENT_IPS;
+    expect(discoverySourceClassFromHeaders({ "user-agent": "generic-agent/1.0" }, null)).toBe("unclassified");
   });
 
   it("sanitizes recent external tool-call history without retaining extra fields", () => {
