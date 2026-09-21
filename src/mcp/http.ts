@@ -38,6 +38,7 @@ import { settlingRecoveryWorkerSnapshot, startSettlingX402RecoveryWorker, stopSe
 import { supplyLedgerPath, supplyPromotionEvidenceSnapshot, withSupplyPromotionProvenance } from "../runtime/supplyLedger.js";
 import { productionAdmissionEnabled, productionAdmissionSnapshot } from "../runtime/x402.js";
 import { enrichX402HttpResultWithBazaar } from "../runtime/x402Bazaar.js";
+import { x402DiscoveryResources, x402WellKnownDocument } from "../runtime/x402Discovery.js";
 import { refreshX402RpcNetworkIdentity } from "../runtime/x402RpcIdentity.js";
 import { reconcileSettledX402Telemetry } from "../runtime/x402TelemetryReconciliation.js";
 import { createPublicProductServer } from "./server.js";
@@ -206,6 +207,31 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
     next();
   });
 
+  app.get(["/.well-known/x402", "/.well-known/x402.json"], (_req: ExpressRequest, res: ExpressResponse) => {
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.status(200).json(x402WellKnownDocument(baseUrl));
+  });
+
+  app.get("/discovery/resources", (req: ExpressRequest, res: ExpressResponse) => {
+    const scalar = (value: unknown): string | undefined => typeof value === "string" ? value : undefined;
+    const integer = (value: unknown): number | undefined => {
+      const raw = scalar(value);
+      if (raw === undefined || !/^\d+$/.test(raw)) return undefined;
+      const parsed = Number(raw);
+      return Number.isSafeInteger(parsed) ? parsed : undefined;
+    };
+    res.setHeader("Cache-Control", "public, max-age=30");
+    res.status(200).json(x402DiscoveryResources(baseUrl, {
+      type: scalar(req.query.type),
+      payTo: scalar(req.query.payTo),
+      scheme: scalar(req.query.scheme),
+      network: scalar(req.query.network),
+      extensions: scalar(req.query.extensions),
+      limit: integer(req.query.limit),
+      offset: integer(req.query.offset),
+    }));
+  });
+
   app.post("/v1/agent/resolve", express.json({ limit: "64kb" }), async (req: ExpressRequest, res: ExpressResponse) => {
     const paymentSignature = req.get("PAYMENT-SIGNATURE");
     const telemetryEvent = paymentSignature ? "x402_signed_request" as const : "x402_unsigned_request" as const;
@@ -343,6 +369,7 @@ export async function serveHttp() {
   process.stdout.write(`MISSING public MCP listening on ${resolvedPublicBaseUrl}/mcp\n`);
   process.stdout.write(`MISSING A2A Agent Card on ${resolvedPublicBaseUrl}/.well-known/agent-card.json\n`);
   process.stdout.write(`MISSING x402 paid capability endpoint on ${resolvedPublicBaseUrl}/v1/agent/resolve\n`);
+  process.stdout.write(`MISSING x402 discovery catalog on ${resolvedPublicBaseUrl}/discovery/resources\n`);
   process.stdout.write(`MISSING sandbox status on ${resolvedPublicBaseUrl}/sandboxz\n`);
 }
 
