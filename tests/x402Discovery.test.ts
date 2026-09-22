@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { x402DiscoveryResources, x402WellKnownDocument } from "../src/runtime/x402Discovery.js";
+import { x402DiscoveryResources, x402LlmsText, x402OpenApiDocument, x402WellKnownDocument } from "../src/runtime/x402Discovery.js";
 
 const ECONOMICS = {
   recipes: {
@@ -34,8 +34,9 @@ describe("x402 public discovery", () => {
     expect(catalog.pagination.total).toBeGreaterThan(0);
     expect(catalog.items.some(item => {
       const bazaar = (item.extensions as any).bazaar;
-      return item.resource === "https://missing.example/v1/agent/resolve"
+      return item.resource === "https://missing.example/v1/agent/resolve/ip_geolocation_metadata"
         && item.type === "http"
+        && item.method === "POST"
         && item.x402Version === 2
         && item.accepts.some(accept => accept.network === "eip155:8453" && accept.amount === "5000")
         && bazaar?.info?.input?.body?.capability === "ip_geolocation_metadata";
@@ -61,21 +62,32 @@ describe("x402 public discovery", () => {
     expect(none.pagination.total).toBe(0);
   });
 
-  it("publishes well-known aliases that point agents to canonical discovery and payment endpoints", () => {
-    expect(x402WellKnownDocument("https://missing.example/")).toEqual({
-      x402Version: 2,
-      service: {
-        name: "MISSING",
-        description: "Replay-verified capabilities for AI agents with x402-paid execution.",
-      },
-      discovery: {
-        resources: "https://missing.example/discovery/resources",
-        aliases: [
-          "https://missing.example/.well-known/x402",
-          "https://missing.example/.well-known/x402.json",
-        ],
-      },
-      paymentEndpoint: "https://missing.example/v1/agent/resolve",
-    });
+  it("embeds payable resources directly in well-known discovery", () => {
+    const manifest = x402WellKnownDocument("https://missing.example/");
+    expect(manifest.x402Version).toBe(2);
+    expect(manifest.name).toBe("MISSING");
+    expect(manifest.discovery.resources).toBe("https://missing.example/discovery/resources");
+    expect(manifest.discovery.openapi).toBe("https://missing.example/openapi.json");
+    expect(manifest.discovery.llms).toBe("https://missing.example/llms.txt");
+    expect(manifest.items.length).toBeGreaterThan(0);
+    expect(manifest.resources).toEqual(manifest.items);
+    expect(manifest.items.some(item =>
+      item.metadata.capability === "ip_geolocation_metadata"
+      && item.resource === "https://missing.example/v1/agent/resolve/ip_geolocation_metadata"
+      && item.method === "POST"
+      && item.accepts[0].network === "eip155:8453"
+    )).toBe(true);
+  });
+
+  it("publishes OpenAPI and llms discovery surfaces for autonomous agents", () => {
+    const openapi = x402OpenApiDocument("https://missing.example");
+    expect(openapi.openapi).toBe("3.1.0");
+    expect(openapi.paths["/v1/agent/resolve/ip_geolocation_metadata"]).toBeTruthy();
+    expect((openapi.paths["/v1/agent/resolve/ip_geolocation_metadata"] as any).post.responses["402"]).toBeTruthy();
+
+    const llms = x402LlmsText("https://missing.example");
+    expect(llms).toContain("https://missing.example/.well-known/x402");
+    expect(llms).toContain("POST https://missing.example/v1/agent/resolve/ip_geolocation_metadata");
+    expect(llms).toContain("PAYMENT-SIGNATURE");
   });
 });
