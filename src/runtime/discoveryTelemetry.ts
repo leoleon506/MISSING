@@ -93,6 +93,7 @@ const KNOWN_PROBE_USER_AGENT_FRAGMENTS = [
   "402explorer",
   "xuseek-mcp-catalog",
   "strata-observatory",
+  "agent-tools.cloud-crawler",
 ];
 
 const PLATFORM_CLIENT_USER_AGENT_FRAGMENTS = [
