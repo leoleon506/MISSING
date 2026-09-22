@@ -106,6 +106,7 @@ describe("public discovery telemetry", () => {
     expect(discoverySourceClassFromHeaders({ "user-agent": "openai-mcp/1.0.0" }, hash)).toBe("platform_client");
     expect(discoverySourceClassFromHeaders({ "user-agent": "SentinelOracle/0.1" }, hash)).toBe("known_probe");
     expect(discoverySourceClassFromHeaders({ "user-agent": "xuseek-mcp-catalog/0.5" }, hash)).toBe("known_probe");
+    expect(discoverySourceClassFromHeaders({ "user-agent": "agent-tools.cloud-crawler/0.1 (+https://agent-tools.cloud)" }, hash)).toBe("known_probe");
     expect(discoverySourceClassFromHeaders({ "user-agent": "generic-mcp-client/1.0" }, hash)).toBe("external_candidate");
   });
 
