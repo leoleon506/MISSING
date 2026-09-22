@@ -38,7 +38,7 @@ import { settlingRecoveryWorkerSnapshot, startSettlingX402RecoveryWorker, stopSe
 import { supplyLedgerPath, supplyPromotionEvidenceSnapshot, withSupplyPromotionProvenance } from "../runtime/supplyLedger.js";
 import { productionAdmissionEnabled, productionAdmissionSnapshot } from "../runtime/x402.js";
 import { enrichX402HttpResultWithBazaar } from "../runtime/x402Bazaar.js";
-import { x402DiscoveryResources, x402WellKnownDocument } from "../runtime/x402Discovery.js";
+import { x402DiscoveryResources, x402LlmsText, x402OpenApiDocument, x402WellKnownDocument } from "../runtime/x402Discovery.js";
 import { refreshX402RpcNetworkIdentity } from "../runtime/x402RpcIdentity.js";
 import { reconcileSettledX402Telemetry } from "../runtime/x402TelemetryReconciliation.js";
 import { createPublicProductServer } from "./server.js";
@@ -212,6 +212,16 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
     res.status(200).json(x402WellKnownDocument(baseUrl));
   });
 
+  app.get("/openapi.json", (_req: ExpressRequest, res: ExpressResponse) => {
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.status(200).json(x402OpenApiDocument(baseUrl));
+  });
+
+  app.get("/llms.txt", (_req: ExpressRequest, res: ExpressResponse) => {
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.type("text/plain").status(200).send(x402LlmsText(baseUrl));
+  });
+
   app.get("/discovery/resources", (req: ExpressRequest, res: ExpressResponse) => {
     const scalar = (value: unknown): string | undefined => typeof value === "string" ? value : undefined;
     const integer = (value: unknown): number | undefined => {
@@ -230,6 +240,55 @@ export function createProductHttpApp(baseUrl = publicBaseUrl()) {
       limit: integer(req.query.limit),
       offset: integer(req.query.offset),
     }));
+  });
+
+  app.post("/v1/agent/resolve/:capability", express.json({ limit: "64kb" }), async (req: ExpressRequest, res: ExpressResponse) => {
+    const capability = String(req.params.capability ?? "");
+    if (!/^[a-z][a-z0-9_]*$/.test(capability)) {
+      res.status(400).json({ error: "invalid_capability" });
+      return;
+    }
+
+    const paymentSignature = req.get("PAYMENT-SIGNATURE");
+    const telemetryEvent = paymentSignature ? "x402_signed_request" as const : "x402_unsigned_request" as const;
+    const suppliedCapability = typeof req.body?.capability === "string" ? req.body.capability : capability;
+    if (suppliedCapability !== capability) {
+      res.status(400).json({ error: "capability_path_body_mismatch" });
+      return;
+    }
+
+    const request = {
+      capability,
+      input: req.body?.input,
+    };
+
+    try {
+      await refreshProductionRpcIdentity();
+      const resourceUrl = `${baseUrl.replace(/\/$/, "")}/v1/agent/resolve/${encodeURIComponent(capability)}`;
+      const paymentResult = await handleAgentPaidResolution({ request, paymentSignature, resourceUrl });
+      const result = enrichX402HttpResultWithBazaar(paymentResult, request);
+      if (paymentSignature) {
+        try {
+          await observeDurableConsumerPayment({
+            paymentSignature,
+            entryChannel: req.get(PUBLIC_ENTRY_CHANNEL_HEADER),
+          });
+        } catch (error) {
+          process.stderr.write(`consumer telemetry observation failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
+      }
+      if (result.headers) for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
+      res.status(result.status).json(result.body);
+      void observePublicInteractions({
+        clientIp: requestIp(req),
+        headers: req.headers,
+        events: [{ event_type: telemetryEvent }],
+        statusCode: result.status,
+      }).catch(error => process.stderr.write(`x402 funnel telemetry observation failed: ${error instanceof Error ? error.message : String(error)}\n`));
+    } catch (error) {
+      process.stderr.write(`direct capability payment request failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+      res.status(500).json({ error: "internal_error" });
+    }
   });
 
   app.post("/v1/agent/resolve", express.json({ limit: "64kb" }), async (req: ExpressRequest, res: ExpressResponse) => {
